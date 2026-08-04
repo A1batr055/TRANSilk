@@ -1,0 +1,6 @@
+{
+  "verification_priority": ["overrides", "local_reference", "web_search", "model_knowledge"],
+  "human_review_batch_max": 30,
+  "translation_batching": "none",
+  "_comment": "translation_batching=none：v1按现有已完成项目的规模（几千字）不分批，超长文本分批的策略未定。"
+}

@@ -1,0 +1,294 @@
+#!/usr/bin/env node
+import path from "node:path";
+import { readAssetConfig, writeAssetConfig, assetConfigPath } from "./lib/assetConfig.mjs";
+import { workDirFor, projectSubdir } from "./lib/paths.mjs";
+import { bootstrapFromLegacyXls, bootstrapFromRawDocument } from "./lib/bootstrapProject.mjs";
+import { assertSegmentCount } from "./lib/segment.mjs";
+import { configuredProjectPath, resolveSourceSegments, targetOutputPath, targetXlsOutputPath } from "./lib/sourceAdapter.mjs";
+import { writeLegacyXlsTranslations } from "./lib/legacyXls.mjs";
+import { analyzeText } from "./stages/01-analyze.mjs";
+import { extractCandidates } from "./stages/02-extract.mjs";
+import { verifyCandidates } from "./stages/03-verify.mjs";
+import { exportCandidatesToWorkbook, importReviewedGlossary } from "./stages/04-freeze.mjs";
+import { translateWithGlossary } from "./stages/05-translate.mjs";
+import { importTermbaseFromPath, mergeIntoTermbase, glossaryToTermbaseEntries } from "./lib/localTermbase.mjs";
+import { runBuildAndValidate } from "./stages/08-build.mjs";
+import { checkRealization, writeCheckReport } from "./stages/07-check.mjs";
+import { parseBilingualTxt, writeBilingualTxt, assertIdSetMatches } from "./lib/bilingual.mjs";
+import fs from "node:fs";
+import { launchTui } from "./tui.mjs";
+import { fileURLToPath } from "node:url";
+
+const [, , command, ...rest] = process.argv;
+
+const USAGE =
+  "用法：\n" +
+  "  transilk bootstrap <项目目录> <原始材料路径> <segmentPrefix> [title] [date=YYYY-MM-DD] --direction <源语->目标语> [--target <既有译文路径>]\n" +
+  "    原始材料路径支持 .xls/.xlsx（三列表格）、.doc/.docx/.txt/.md（未预先切段的原文）\n" +
+  "    --target 仅用于文档类材料：按段落对齐既有译文，不给则自动切句、留空译文\n" +
+  "  transilk prep      <项目目录>   # Stages 1–3 → 术语审阅 Excel，停\n" +
+  "  transilk translate <项目目录>   # Stages 4–5 → 双语对照 txt，停\n" +
+  "  transilk finish    <项目目录>   # Stages 7–8 → 核查 + 落库交付译文\n" +
+  "  transilk archive   <项目目录>   # 可选：生成双语对齐工作簿 + TMX/TBX/JSONL（积累个人资产）\n" +
+  "  transilk import-termbase <TBX文件或目录>   # 导入本地术语库，供 Stage 3 机械命中";
+
+const COMMANDS = {
+  bootstrap: runBootstrap,
+  prep: runPrep,
+  translate: runTranslate,
+  finish: runFinish,
+  archive: runArchive,
+  "import-termbase": runImportTermbase,
+};
+
+async function main() {
+  if (command === "version" || command === "--version" || command === "-v") {
+    const packagePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+    const packageInfo = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+    console.log(`TRANSilk ${packageInfo.version}`);
+    return;
+  }
+  if (!command) {
+    if (process.stdin.isTTY && process.stdout.isTTY) {
+      await launchTui();
+    } else {
+      console.error(USAGE);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (!COMMANDS[command]) {
+    console.error(USAGE);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (command === "bootstrap") {
+    const targetFlagIndex = rest.indexOf("--target");
+    const targetPathArg = targetFlagIndex >= 0 ? rest[targetFlagIndex + 1] : undefined;
+    const directionFlagIndex = rest.indexOf("--direction");
+    const directionArg = directionFlagIndex >= 0 ? rest[directionFlagIndex + 1] : undefined;
+    const optionIndexes = [targetFlagIndex, directionFlagIndex].filter((index) => index >= 0);
+    const firstOptionIndex = optionIndexes.length ? Math.min(...optionIndexes) : rest.length;
+    const positional = rest.slice(0, firstOptionIndex);
+
+    const [projectDirArg, sourcePath, segmentPrefix, title, date] = positional;
+    if (!projectDirArg || !sourcePath || !segmentPrefix) {
+      console.error(USAGE);
+      process.exitCode = 1;
+      return;
+    }
+    await runBootstrap(
+      path.resolve(projectDirArg),
+      path.resolve(sourcePath),
+      segmentPrefix,
+      title,
+      date,
+      targetPathArg ? path.resolve(targetPathArg) : undefined,
+      directionArg,
+    );
+    return;
+  }
+
+  const [projectDirArg] = rest;
+  if (!projectDirArg) {
+    console.error(USAGE);
+    process.exitCode = 1;
+    return;
+  }
+  await COMMANDS[command](path.resolve(projectDirArg));
+}
+
+async function runBootstrap(projectDir, sourcePath, segmentPrefix, title, date, targetPath, direction) {
+  const resolvedTitle = title || path.basename(projectDir);
+  const resolvedDate = date || new Date().toISOString().slice(0, 10);
+  const ext = path.extname(sourcePath).toLowerCase();
+
+  const { segments } =
+    ext === ".xls" || ext === ".xlsx"
+      ? bootstrapFromLegacyXls({
+          xlsPath: sourcePath,
+          projectDir,
+          title: resolvedTitle,
+          segmentPrefix,
+          date: resolvedDate,
+          direction,
+        })
+      : await bootstrapFromRawDocument({
+          sourcePath,
+          targetPath,
+          projectDir,
+          title: resolvedTitle,
+          segmentPrefix,
+          date: resolvedDate,
+          direction,
+        });
+  console.log(`bootstrap完成：${segments.length} 句段，asset-config.json 已写入 ${assetConfigPath(projectDir)}`);
+  console.log("接下来执行 prep 命令继续 Stages 1–3。");
+}
+
+async function runPrep(projectDir) {
+  const config = readAssetConfig(projectDir);
+  const workDir = workDirFor(projectDir);
+  const { segments, sections } = await resolveSourceSegments(config, projectDir);
+  assertSegmentCount(segments, config.expectedSegments);
+  fs.writeFileSync(
+    path.join(workDir, "segments.json"),
+    JSON.stringify({ segments, rawSections: sections }, null, 2),
+    "utf8"
+  );
+
+  const analyzed = await analyzeText(segments, sections, config);
+  writeAssetConfig(projectDir, analyzed);
+  console.log(`Stage 1 完成：domain=${analyzed.domain}，defaultTopic=${analyzed.defaultTopic}`);
+
+  const candidates = await extractCandidates(segments, analyzed);
+  fs.writeFileSync(
+    path.join(workDir, "candidates.jsonl"),
+    candidates.map((c) => JSON.stringify(c)).join("\n") + "\n",
+    "utf8"
+  );
+  console.log(`Stage 2 完成：候选术语 ${candidates.length} 条`);
+
+  const evidence = await verifyCandidates(candidates, analyzed, projectDir);
+  fs.writeFileSync(
+    path.join(workDir, "evidence.jsonl"),
+    evidence.map((e) => JSON.stringify(e)).join("\n") + "\n",
+    "utf8"
+  );
+  console.log(`Stage 3 完成：查证记录 ${evidence.length} 条`);
+
+  const workbookPath = path.join(workDir, analyzed.workbookName || "候选术语审阅.xlsx");
+  await exportCandidatesToWorkbook(candidates, evidence, workbookPath, analyzed);
+  console.log(`候选术语审阅表已导出：${workbookPath}`);
+  console.log(`请修改「${analyzed.targetLabel || analyzed.targetLanguage}译法」，或在「删除」列选择「删除」；存盘后返回 TRANSilk 继续。`);
+}
+
+async function runTranslate(projectDir) {
+  const config = readAssetConfig(projectDir);
+  const workDir = workDirFor(projectDir);
+  const workbookPath = path.join(workDir, config.workbookName || "候选术语审阅.xlsx");
+  if (!fs.existsSync(workbookPath)) {
+    throw new Error(`没找到术语审阅表，先跑 prep：${workbookPath}`);
+  }
+
+  const candidates = fs
+    .readFileSync(path.join(workDir, "candidates.jsonl"), "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const evidence = fs
+    .readFileSync(path.join(workDir, "evidence.jsonl"), "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const glossary = await importReviewedGlossary(workbookPath, candidates, evidence);
+  const glossaryPath = path.join(projectSubdir(projectDir, "99_项目配置与术语源数据"), "术语源数据.jsonl");
+  fs.mkdirSync(path.dirname(glossaryPath), { recursive: true });
+  fs.writeFileSync(glossaryPath, glossary.map((g) => JSON.stringify(g)).join("\n") + "\n", "utf8");
+  console.log(`Stage 4 完成：术语表已冻结，${glossary.length} 条，写入 ${glossaryPath}`);
+
+  const termbaseEntries = glossaryToTermbaseEntries(glossary, config);
+  if (termbaseEntries.length) {
+    const termbaseSize = mergeIntoTermbase(termbaseEntries);
+    console.log(`已合并 ${termbaseEntries.length} 条术语进本地术语库（累计 ${termbaseSize} 条）。`);
+  }
+
+  const { segments } = JSON.parse(fs.readFileSync(path.join(workDir, "segments.json"), "utf8"));
+  const translated = await translateWithGlossary(segments, glossary, config);
+  const bilingualPath = path.join(workDir, "bilingual.txt");
+  fs.writeFileSync(bilingualPath, writeBilingualTxt(translated), "utf8");
+  console.log(`Stage 5 完成：双语对照 txt 已写入 ${bilingualPath}，请直接在这份 txt 上做PE，改完执行 finish 命令继续。`);
+}
+
+async function runFinish(projectDir) {
+  const config = readAssetConfig(projectDir);
+  const workDir = workDirFor(projectDir);
+  const bilingualPath = path.join(workDir, "bilingual.txt");
+  if (!fs.existsSync(bilingualPath)) {
+    throw new Error(`没找到 PE 后的双语对照 txt：${bilingualPath}`);
+  }
+  const segments = parseBilingualTxt(fs.readFileSync(bilingualPath, "utf8"));
+  const { segments: sourceSegments } = await resolveSourceSegments(config, projectDir);
+  assertIdSetMatches(segments, sourceSegments.map((s) => s.id));
+
+  const glossaryPath = path.join(projectSubdir(projectDir, "99_项目配置与术语源数据"), "术语源数据.jsonl");
+  const glossary = fs
+    .readFileSync(glossaryPath, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const report = checkRealization(glossary, segments, config);
+  const reportPath = writeCheckReport(workDir, report);
+
+  // 核查只告警；Agent 不得据此阻断人工裁决后的交付。
+  if (report.length > 0) {
+    console.log(`落实核查发现 ${report.length} 处术语未落地，详见 ${reportPath}，人工确认后继续。`);
+  } else {
+    console.log("落实核查通过，术语全部落地。");
+  }
+
+  const targetPath = targetOutputPath(config, projectDir);
+  fs.writeFileSync(targetPath, segments.map((s) => s.target).join("\n") + "\n", "utf8");
+
+  if (config.sourceFormat === "legacy-xls" || config.sourceFormat === "xlsx") {
+    const targetById = new Map(segments.map((s) => [s.id, s.target]));
+    const rowTexts = sourceSegments
+      .filter((s) => targetById.has(s.id))
+      .map((s) => ({ row: s.excelRow, text: targetById.get(s.id) }));
+    const xlsOutPath = targetXlsOutputPath(config, projectDir);
+    writeLegacyXlsTranslations(configuredProjectPath(projectDir, config.sourceFile), xlsOutPath, rowTexts);
+    console.log(`译文已写入 ${targetPath}（纯文本版）和 ${xlsOutPath}（原表格式，不改原文件）。`);
+    console.log("如需积累双语对齐工作簿 + TM/术语资产包，执行 archive 命令（可选）。");
+    return;
+  }
+
+  if (config.sourceFormat === "raw-document") {
+    console.log(`译文已写入 ${targetPath}。`);
+    console.log("如需积累双语对齐工作簿 + TM/术语资产包，执行 archive 命令（可选）。");
+    return;
+  }
+  await runBuildAndValidate(projectDir);
+}
+
+async function runArchive(projectDir) {
+  const config = readAssetConfig(projectDir);
+  const workDir = workDirFor(projectDir);
+  const bilingualPath = path.join(workDir, "bilingual.txt");
+
+  let precomputed;
+  if (fs.existsSync(bilingualPath)) {
+    const peSegments = parseBilingualTxt(fs.readFileSync(bilingualPath, "utf8"));
+    const { segments: sourceSegments } = await resolveSourceSegments(config, projectDir);
+    assertIdSetMatches(peSegments, sourceSegments.map((s) => s.id));
+    const targetById = new Map(peSegments.map((s) => [s.id, s.target]));
+    const ordered = [...sourceSegments].sort((a, b) => a.index - b.index);
+    precomputed = {
+      sourceLines: ordered.map((s) => s.text),
+      targetLines: ordered.map((s) => targetById.get(s.id)),
+    };
+  } else if (config.sourceFormat === "legacy-xls" || config.sourceFormat === "xlsx" || config.sourceFormat === "raw-document") {
+    throw new Error(`没找到 PE 后的双语对照 txt，先跑 translate：${bilingualPath}`);
+  }
+
+  const built = await runBuildAndValidate(projectDir, precomputed);
+  console.log(`积累完成：工作簿 ${built.xlsxPath}`);
+  console.log(`TMX/TBX/JSONL 已生成于 03_翻译记忆与术语交换文件（${built.alignmentUnits} 个句段，${built.glossaryEntries} 条术语）。`);
+}
+
+async function runImportTermbase(inputPath) {
+  const result = importTermbaseFromPath(inputPath);
+  for (const item of result.imported) {
+    console.log(`已解析 ${item.file}：${item.count} 条`);
+  }
+  for (const item of result.skipped) {
+    console.log(`跳过 ${item.file}：${item.reason}`);
+  }
+  console.log(`本地术语库导入完成：新增/更新 ${result.addedOrUpdated} 条，累计 ${result.termbaseSize} 条。`);
+}
+
+main().catch((err) => {
+  console.error(err.message);
+  process.exitCode = 1;
+});

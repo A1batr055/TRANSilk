@@ -1,0 +1,37 @@
+{
+  "name": "transilk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "术语先查证、译者钉在中间的中英互译流水线。",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "transilk": "./src/cli.mjs"
+  },
+  "files": [
+    "src",
+    "config/default.json",
+    "TRANSilk.cmd",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node src/cli.mjs",
+    "test": "node --test",
+    "prep": "node src/cli.mjs prep",
+    "translate": "node src/cli.mjs translate",
+    "finish": "node src/cli.mjs finish"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.10.1",
+    "ink": "^7.1.1",
+    "jszip": "^3.10.1",
+    "prompts": "^2.4.2",
+    "react": "^19.2.8"
+  },
+  "devDependencies": {
+    "ink-testing-library": "^4.0.0"
+  }
+}
