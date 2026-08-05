@@ -31,6 +31,6 @@ export async function callOpenAICompatible({ baseURL, model, apiKey }, { system,
     return JSON.parse(content);
   } catch (error) {
     const preview = content ? (content.length > 300 ? `${content.slice(0, 300)}…` : content) : "（空响应）";
-    throw new Error(`模型返回的内容不是合法JSON（${error.message}）：${preview}`);
+    throw new Error(`模型返回的内容不是合法JSON（${error.message}），可能是响应抖动，可重跑当前命令重试：${preview}`);
   }
 }
