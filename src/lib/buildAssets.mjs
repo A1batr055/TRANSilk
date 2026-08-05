@@ -3,7 +3,7 @@ import path from "node:path";
 import { segmentId } from "./segment.mjs";
 import { projectSubdir } from "./paths.mjs";
 import { writeAssetWorkbook } from "./assetWorkbook.mjs";
-import { termFields } from "./language.mjs";
+import { termFields, dedupeGlossaryTerms } from "./language.mjs";
 
 
 function escXml(s) {
@@ -148,21 +148,24 @@ export async function buildAssets(config, projectDir, precomputed) {
         .filter(Boolean)
         .map((l) => JSON.parse(l))
     : [];
-  const glossary = glossaryRaw.map((g) => {
-    const pair = pairsById.get(g.source_segment_id);
-    const { sourceField, targetField } = termFields(config);
-    return {
-      ...g,
-      en_variants: g.en_variants ?? [],
-      [`${targetField}_variants`]: g[`${targetField}_variants`] ?? g.en_variants ?? [],
-      context_source: pair?.[sourceField] ?? "",
-      context_target: pair?.[targetField] ?? "",
-      context_zh: pair?.zh_CN ?? g.context_zh ?? "",
-      context_en: pair?.en_US ?? g.context_en ?? "",
-      source_title: config.title,
-      created_on: config.date,
-    };
-  });
+  const { sourceField, targetField } = termFields(config);
+  const glossary = dedupeGlossaryTerms(
+    glossaryRaw.map((g) => {
+      const pair = pairsById.get(g.source_segment_id);
+      return {
+        ...g,
+        en_variants: g.en_variants ?? [],
+        [`${targetField}_variants`]: g[`${targetField}_variants`] ?? g.en_variants ?? [],
+        context_source: pair?.[sourceField] ?? "",
+        context_target: pair?.[targetField] ?? "",
+        context_zh: pair?.zh_CN ?? g.context_zh ?? "",
+        context_en: pair?.en_US ?? g.context_en ?? "",
+        source_title: config.title,
+        created_on: config.date,
+      };
+    }),
+    config
+  );
   const seenIds = new Set();
   for (const g of glossary) {
     if (seenIds.has(g.id)) throw new Error(`术语ID重复：${g.id}`);

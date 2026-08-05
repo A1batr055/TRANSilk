@@ -113,6 +113,17 @@ export function termFields(config) {
   };
 }
 
+export function dedupeGlossaryTerms(entries, config) {
+  const { sourceField, targetField } = termFields(config);
+  const seen = new Set();
+  return entries.filter((g) => {
+    const key = `${g[sourceField]}|${g[targetField]}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function languageLabelFor(code) {
   return languageName(normalizeLanguageCode(code));
 }

@@ -4,7 +4,7 @@ import { XMLParser } from "fast-xml-parser";
 import { segmentId } from "./segment.mjs";
 import { projectSubdir } from "./paths.mjs";
 import { readAssetWorkbook } from "./assetWorkbook.mjs";
-import { termFields } from "./language.mjs";
+import { termFields, dedupeGlossaryTerms } from "./language.mjs";
 
 
 function readLines(filePath) {
@@ -44,7 +44,14 @@ export async function validateAssets(config, projectDir, precomputed) {
   }
 
   const glossaryPath = path.join(projectDir, config.glossarySource);
-  const glossaryCount = fs.existsSync(glossaryPath) ? readJsonlCount(glossaryPath) : 0;
+  const glossaryRaw = fs.existsSync(glossaryPath)
+    ? fs
+        .readFileSync(glossaryPath, "utf8")
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((l) => JSON.parse(l))
+    : [];
+  const glossaryCount = dedupeGlossaryTerms(glossaryRaw, config).length;
 
   const workbookPath = path.join(mainDir, config.workbookName);
   const { sheetNames, sheets } = await readAssetWorkbook(fs.readFileSync(workbookPath));
