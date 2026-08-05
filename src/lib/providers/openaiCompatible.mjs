@@ -26,5 +26,11 @@ export async function callOpenAICompatible({ baseURL, model, apiKey }, { system,
 
   const data = await res.json();
   const content = data.choices?.[0]?.message?.content ?? "";
-  return json ? JSON.parse(content) : content;
+  if (!json) return content;
+  try {
+    return JSON.parse(content);
+  } catch (error) {
+    const preview = content ? (content.length > 300 ? `${content.slice(0, 300)}…` : content) : "（空响应）";
+    throw new Error(`模型返回的内容不是合法JSON（${error.message}）：${preview}`);
+  }
 }
