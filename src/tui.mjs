@@ -8,6 +8,7 @@ import { deleteProject, inspectProject, listProjects, normalizeInputPath, projec
 import { clearModelConfig, hasModelConfig, modelConfigSummary, MODEL_PRESETS, readModelConfig, saveModelConfig } from "./lib/configWizard.mjs";
 import { listAvailableModels } from "./lib/modelCatalog.mjs";
 import { LANGUAGE_OPTIONS } from "./lib/language.mjs";
+import { listDomainLabels, loadPendingDomains, addDomain } from "./lib/domainTaxonomy.mjs";
 
 const h = React.createElement;
 const CLI_PATH = path.join(TOOL_ROOT, "src", "cli.mjs");
@@ -145,12 +146,13 @@ function Running({ task }) {
   );
 }
 
-function Home({ projectCount, model, notice, onCreate, onProjects, onSettings, onImportTermbase, onClearConfig, onExit }) {
+function Home({ projectCount, model, notice, onCreate, onProjects, onSettings, onImportTermbase, onDomainTaxonomy, onClearConfig, onExit }) {
   const items = [
     { value: "new", label: "＋ 新建翻译项目" },
     { value: "projects", label: `项目列表  ·  ${projectCount} 个` },
     { value: "settings", label: `模型设置  ·  ${model.label}` },
     { value: "import-termbase", label: "导入本地术语库" },
+    { value: "domain-taxonomy", label: "领域词表管理" },
     { value: "clear-config", label: "清空本地 API 配置" },
     { value: "exit", label: "退出" },
   ];
@@ -166,6 +168,7 @@ function Home({ projectCount, model, notice, onCreate, onProjects, onSettings, o
         else if (item.value === "projects") onProjects();
         else if (item.value === "settings") onSettings();
         else if (item.value === "import-termbase") onImportTermbase();
+        else if (item.value === "domain-taxonomy") onDomainTaxonomy();
         else if (item.value === "clear-config") onClearConfig();
         else if (item.value === "exit") onExit();
       },
@@ -181,6 +184,24 @@ function ImportTermbasePath({ onSubmit, onBack }) {
     h(TextEntry, {
       label: "TBX 文件或所在目录的路径",
       placeholder: "可把文件或文件夹拖进终端",
+      onSubmit,
+      onBack,
+    }),
+  );
+}
+
+function DomainTaxonomyScreen({ domains, pending, onSubmit, onBack }) {
+  return h(
+    Frame,
+    { title: "领域词表管理", subtitle: `已收录 ${domains.length} 项` },
+    h(Box, { flexDirection: "column", marginBottom: 1 },
+      pending.length === 0
+        ? h(Text, { dimColor: true }, "暂无待归类记录。")
+        : pending.map((p, i) => h(Text, { key: i, dimColor: true }, `[${p.date}] ${p.title}：${p.suggestion}`)),
+    ),
+    h(TextEntry, {
+      label: "新增领域名（收进封闭词表）",
+      placeholder: "例如：医学",
       onSubmit,
       onBack,
     }),
@@ -843,6 +864,24 @@ export function App({ initialScreen, initialModel } = {}) {
       },
     });
   }
+  if (screen === "domain-taxonomy") {
+    return h(DomainTaxonomyScreen, {
+      domains: listDomainLabels(),
+      pending: loadPendingDomains(),
+      onBack: () => setScreen("home"),
+      onSubmit: (input) => {
+        try {
+          const label = input.trim();
+          if (!label) throw new Error("请输入领域名。");
+          const total = addDomain(label);
+          setNotice({ kind: "success", text: `已加入封闭词表："${label}"（当前共 ${total} 项）。` });
+        } catch (error) {
+          setNotice({ kind: "error", text: error.message });
+        }
+        setScreen("home");
+      },
+    });
+  }
   if (screen === "config") {
     return h(ConfigWizard, {
       pendingLabel: pending?.label,
@@ -910,6 +949,10 @@ export function App({ initialScreen, initialModel } = {}) {
     onImportTermbase: () => {
       setNotice(null);
       setScreen("import-termbase");
+    },
+    onDomainTaxonomy: () => {
+      setNotice(null);
+      setScreen("domain-taxonomy");
     },
     onClearConfig: () => {
       setPending(null);

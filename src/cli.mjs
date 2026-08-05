@@ -12,6 +12,7 @@ import { verifyCandidates } from "./stages/03-verify.mjs";
 import { exportCandidatesToWorkbook, importReviewedGlossary } from "./stages/04-freeze.mjs";
 import { translateWithGlossary } from "./stages/05-translate.mjs";
 import { importTermbaseFromPath, mergeIntoTermbase, glossaryToTermbaseEntries } from "./lib/localTermbase.mjs";
+import { loadPendingDomains, addDomain, recordPendingDomain, PENDING_DOMAIN_LABEL } from "./lib/domainTaxonomy.mjs";
 import { runBuildAndValidate } from "./stages/08-build.mjs";
 import { checkRealization, writeCheckReport } from "./stages/07-check.mjs";
 import { parseBilingualTxt, writeBilingualTxt, assertIdSetMatches } from "./lib/bilingual.mjs";
@@ -30,7 +31,9 @@ const USAGE =
   "  transilk translate <项目目录>   # Stages 4–5 → 双语对照 txt，停\n" +
   "  transilk finish    <项目目录>   # Stages 7–8 → 核查 + 落库交付译文\n" +
   "  transilk archive   <项目目录>   # 可选：生成双语对齐工作簿 + TMX/TBX/JSONL（积累个人资产）\n" +
-  "  transilk import-termbase <TBX文件或目录>   # 导入本地术语库，供 Stage 3 机械命中";
+  "  transilk import-termbase <TBX文件或目录>   # 导入本地术语库，供 Stage 3 机械命中\n" +
+  "  transilk list-pending-domains   # 查看 Stage 1 归不进封闭词表、待人工确认的领域建议\n" +
+  "  transilk add-domain <领域名>   # 把领域名加入封闭词表";
 
 const COMMANDS = {
   bootstrap: runBootstrap,
@@ -39,6 +42,8 @@ const COMMANDS = {
   finish: runFinish,
   archive: runArchive,
   "import-termbase": runImportTermbase,
+  "list-pending-domains": runListPendingDomains,
+  "add-domain": runAddDomain,
 };
 
 async function main() {
@@ -88,6 +93,22 @@ async function main() {
       targetPathArg ? path.resolve(targetPathArg) : undefined,
       directionArg,
     );
+    return;
+  }
+
+  if (command === "list-pending-domains") {
+    await runListPendingDomains();
+    return;
+  }
+
+  if (command === "add-domain") {
+    const [label] = rest;
+    if (!label) {
+      console.error(USAGE);
+      process.exitCode = 1;
+      return;
+    }
+    await runAddDomain(label);
     return;
   }
 
@@ -141,7 +162,12 @@ async function runPrep(projectDir) {
 
   const analyzed = await analyzeText(segments, sections, config);
   writeAssetConfig(projectDir, analyzed);
-  console.log(`Stage 1 完成：domain=${analyzed.domain}，defaultTopic=${analyzed.defaultTopic}`);
+  if (analyzed.domain === PENDING_DOMAIN_LABEL) {
+    recordPendingDomain(analyzed.domainSuggestion, { title: analyzed.title, date: analyzed.date });
+    console.log(`Stage 1 完成：domain=${analyzed.domain}（模型建议"${analyzed.domainSuggestion}"，已记录待归类，可用 add-domain 转正），defaultTopic=${analyzed.defaultTopic}`);
+  } else {
+    console.log(`Stage 1 完成：domain=${analyzed.domain}，defaultTopic=${analyzed.defaultTopic}`);
+  }
 
   const candidates = await extractCandidates(segments, analyzed);
   fs.writeFileSync(
@@ -286,6 +312,22 @@ async function runImportTermbase(inputPath) {
     console.log(`跳过 ${item.file}：${item.reason}`);
   }
   console.log(`本地术语库导入完成：新增/更新 ${result.addedOrUpdated} 条，累计 ${result.termbaseSize} 条。`);
+}
+
+async function runListPendingDomains() {
+  const pending = loadPendingDomains();
+  if (pending.length === 0) {
+    console.log("暂无待归类领域记录。");
+    return;
+  }
+  for (const p of pending) {
+    console.log(`[${p.date}] ${p.title}：${p.suggestion}`);
+  }
+}
+
+async function runAddDomain(label) {
+  const total = addDomain(label);
+  console.log(`已加入封闭词表："${label}"（当前共 ${total} 项）。`);
 }
 
 main().catch((err) => {
