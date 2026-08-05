@@ -369,7 +369,7 @@ async function runCheckUpdate() {
     console.log(result.message);
     if (result.status === "diverged") process.exitCode = 1;
   } catch (error) {
-    console.error(`检查更新失败：${error.message}`);
+    console.error(`检查更新失败：${error.message}，可手动执行 git pull 重试`);
     process.exitCode = 1;
   }
 }

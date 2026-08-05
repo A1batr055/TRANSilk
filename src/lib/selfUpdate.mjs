@@ -2,8 +2,14 @@ import { spawn } from "node:child_process";
 import { TOOL_ROOT } from "./paths.mjs";
 
 const UPSTREAM_BRANCH = "main";
+const GIT_TIMEOUT_MS = 15000;
 
-function runGit(args) {
+function killTree(child) {
+  if (process.platform === "win32") spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true });
+  else child.kill();
+}
+
+function runGit(args, timeoutMs = GIT_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const [spawnCommand, spawnArgs] = process.platform === "win32"
       ? ["cmd.exe", ["/d", "/s", "/c", "git", ...args]]
@@ -11,10 +17,23 @@ function runGit(args) {
     const child = spawn(spawnCommand, spawnArgs, { cwd: TOOL_ROOT, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killTree(child);
+    }, timeoutMs);
     child.stdout.on("data", (chunk) => (stdout += chunk));
     child.stderr.on("data", (chunk) => (stderr += chunk));
-    child.on("error", (error) => reject(new Error(`无法启动 git：${error.message}`)));
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(new Error(`无法启动 git：${error.message}`));
+    });
     child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error(`git ${args.join(" ")} 超时（可能需要代理才能访问 GitHub）`));
+        return;
+      }
       if (code !== 0) reject(new Error(stderr.trim() || stdout.trim() || `git ${args.join(" ")} 退出码 ${code}`));
       else resolve(stdout.trim());
     });

@@ -162,7 +162,7 @@ function Home({ projectCount, model, notice, onCreate, onProjects, onSettings, o
   return h(
     Frame,
     { title: "TRANSilk", subtitle: "多语言翻译 · A1batr055" },
-    notice ? h(Box, { marginBottom: 1 }, h(Text, { color: notice.kind === "error" ? "red" : "green" }, notice.text)) : null,
+    notice ? h(Box, { marginBottom: 1 }, h(Text, { color: notice.kind === "error" ? "red" : notice.kind === "pending" ? "yellow" : "green" }, notice.text)) : null,
     h(Menu, {
       items,
       onSelect: (item) => {
@@ -958,12 +958,12 @@ export function App({ initialScreen, initialModel } = {}) {
       setScreen("domain-taxonomy");
     },
     onCheckUpdate: async () => {
-      setNotice(null);
+      setNotice({ kind: "pending", text: "正在检查更新…" });
       try {
         const result = await checkForUpdates();
         setNotice({ kind: result.status === "diverged" ? "error" : "success", text: result.message });
       } catch (error) {
-        setNotice({ kind: "error", text: `检查更新失败：${error.message}` });
+        setNotice({ kind: "error", text: `检查更新失败：${error.message}，可手动执行 git pull 重试` });
       }
     },
     onClearConfig: () => {
