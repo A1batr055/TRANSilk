@@ -13,6 +13,7 @@ import { exportCandidatesToWorkbook, importReviewedGlossary } from "./stages/04-
 import { translateWithGlossary } from "./stages/05-translate.mjs";
 import { importTermbaseFromPath, mergeIntoTermbase, glossaryToTermbaseEntries } from "./lib/localTermbase.mjs";
 import { loadPendingDomains, addDomain, recordPendingDomain, PENDING_DOMAIN_LABEL } from "./lib/domainTaxonomy.mjs";
+import { checkForUpdates } from "./lib/selfUpdate.mjs";
 import { runBuildAndValidate } from "./stages/08-build.mjs";
 import { checkRealization, writeCheckReport } from "./stages/07-check.mjs";
 import { parseBilingualTxt, writeBilingualTxt, assertIdSetMatches } from "./lib/bilingual.mjs";
@@ -33,7 +34,8 @@ const USAGE =
   "  transilk archive   <项目目录>   # 可选：生成双语对齐工作簿 + TMX/TBX/JSONL（积累个人资产）\n" +
   "  transilk import-termbase <TBX文件或目录>   # 导入本地术语库，供 Stage 3 机械命中\n" +
   "  transilk list-pending-domains   # 查看 Stage 1 归不进封闭词表、待人工确认的领域建议\n" +
-  "  transilk add-domain <领域名>   # 把领域名加入封闭词表";
+  "  transilk add-domain <领域名>   # 把领域名加入封闭词表\n" +
+  "  transilk check-update   # 检查并拉取上游更新（仅在可快进合并时才会更新）";
 
 const COMMANDS = {
   bootstrap: runBootstrap,
@@ -44,6 +46,7 @@ const COMMANDS = {
   "import-termbase": runImportTermbase,
   "list-pending-domains": runListPendingDomains,
   "add-domain": runAddDomain,
+  "check-update": runCheckUpdate,
 };
 
 async function main() {
@@ -109,6 +112,11 @@ async function main() {
       return;
     }
     await runAddDomain(label);
+    return;
+  }
+
+  if (command === "check-update") {
+    await runCheckUpdate();
     return;
   }
 
@@ -328,6 +336,17 @@ async function runListPendingDomains() {
 async function runAddDomain(label) {
   const total = addDomain(label);
   console.log(`已加入封闭词表："${label}"（当前共 ${total} 项）。`);
+}
+
+async function runCheckUpdate() {
+  try {
+    const result = await checkForUpdates();
+    console.log(result.message);
+    if (result.status === "diverged") process.exitCode = 1;
+  } catch (error) {
+    console.error(`检查更新失败：${error.message}`);
+    process.exitCode = 1;
+  }
 }
 
 main().catch((err) => {

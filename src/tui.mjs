@@ -9,6 +9,7 @@ import { clearModelConfig, hasModelConfig, modelConfigSummary, MODEL_PRESETS, re
 import { listAvailableModels } from "./lib/modelCatalog.mjs";
 import { LANGUAGE_OPTIONS } from "./lib/language.mjs";
 import { listDomainLabels, loadPendingDomains, addDomain } from "./lib/domainTaxonomy.mjs";
+import { checkForUpdates } from "./lib/selfUpdate.mjs";
 
 const h = React.createElement;
 const CLI_PATH = path.join(TOOL_ROOT, "src", "cli.mjs");
@@ -146,13 +147,14 @@ function Running({ task }) {
   );
 }
 
-function Home({ projectCount, model, notice, onCreate, onProjects, onSettings, onImportTermbase, onDomainTaxonomy, onClearConfig, onExit }) {
+function Home({ projectCount, model, notice, onCreate, onProjects, onSettings, onImportTermbase, onDomainTaxonomy, onCheckUpdate, onClearConfig, onExit }) {
   const items = [
     { value: "new", label: "＋ 新建翻译项目" },
     { value: "projects", label: `项目列表  ·  ${projectCount} 个` },
     { value: "settings", label: `模型设置  ·  ${model.label}` },
     { value: "import-termbase", label: "导入本地术语库" },
     { value: "domain-taxonomy", label: "领域词表管理" },
+    { value: "check-update", label: "检查更新" },
     { value: "clear-config", label: "清空本地 API 配置" },
     { value: "exit", label: "退出" },
   ];
@@ -169,6 +171,7 @@ function Home({ projectCount, model, notice, onCreate, onProjects, onSettings, o
         else if (item.value === "settings") onSettings();
         else if (item.value === "import-termbase") onImportTermbase();
         else if (item.value === "domain-taxonomy") onDomainTaxonomy();
+        else if (item.value === "check-update") onCheckUpdate();
         else if (item.value === "clear-config") onClearConfig();
         else if (item.value === "exit") onExit();
       },
@@ -953,6 +956,15 @@ export function App({ initialScreen, initialModel } = {}) {
     onDomainTaxonomy: () => {
       setNotice(null);
       setScreen("domain-taxonomy");
+    },
+    onCheckUpdate: async () => {
+      setNotice(null);
+      try {
+        const result = await checkForUpdates();
+        setNotice({ kind: result.status === "diverged" ? "error" : "success", text: result.message });
+      } catch (error) {
+        setNotice({ kind: "error", text: `检查更新失败：${error.message}` });
+      }
     },
     onClearConfig: () => {
       setPending(null);
