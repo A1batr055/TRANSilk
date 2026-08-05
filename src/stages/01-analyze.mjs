@@ -1,4 +1,5 @@
 import { callModel } from "../lib/modelClient.mjs";
+import { listDomainLabels, PENDING_DOMAIN_LABEL } from "../lib/domainTaxonomy.mjs";
 
 export async function analyzeText(segments, sections, config) {
   const blockSample = (start, end) =>
@@ -16,6 +17,8 @@ export async function analyzeText(segments, sections, config) {
     .map((b, i) => `【第${i + 1}段，句段${b.start}-${b.end}起始节选】\n${b.sample}`)
     .join("\n\n");
 
+  const domainLabels = listDomainLabels();
+
   const result = await callModel({
     system:
       `你是${config.sourceLabel || config.sourceLanguage}到${config.targetLabel || config.targetLanguage}翻译项目的文本分析助手。` +
@@ -24,11 +27,13 @@ export async function analyzeText(segments, sections, config) {
       "请只输出JSON，不要多余解释。",
     user:
       `${promptBlocks}\n\n请判断：\n` +
-      `1) domain：整份文件的领域，简短中文短语(不超过10个字)\n` +
+      `1) domain：整份文件的领域，必须从下面列表中选一项，一字不差地照抄，不要自造新词、不要增删字：\n${domainLabels.join("、")}\n` +
+      `如果列表里没有足够贴切的一项，domain 填"${PENDING_DOMAIN_LABEL}"，并在 domainSuggestion 里给出你认为合适的简短中文领域短语(不超过10个字)；` +
+      `如果成功从列表中选中了某项，domainSuggestion 填空字符串。\n` +
       `2) topics：一个数组，对应上面每一段各自的主题概括，简短中文短语(不超过12个字)，长度必须等于${blocks.length}\n` +
       `3) styleNotes：一个数组，对应上面每一段各自的文体/语域特征，供翻译时定风格用，` +
       `简短中文短语(不超过20个字，例如"客观陈述句，操作步骤用祈使句"或"营销文案，短句强调感染力，保留品牌语气")，长度必须等于${blocks.length}\n\n` +
-      `按此JSON格式回复：{"domain": "...", "topics": ["...", "..."], "styleNotes": ["...", "..."]}`,
+      `按此JSON格式回复：{"domain": "...", "domainSuggestion": "...", "topics": ["...", "..."], "styleNotes": ["...", "..."]}`,
     json: true,
   });
 
@@ -47,9 +52,13 @@ export async function analyzeText(segments, sections, config) {
     styleNote: result.styleNotes[i + 1],
   }));
 
+  const domain = domainLabels.includes(result.domain) ? result.domain : PENDING_DOMAIN_LABEL;
+  const domainSuggestion = domain === PENDING_DOMAIN_LABEL ? String(result.domainSuggestion || result.domain || "").trim() : "";
+
   return {
     ...config,
-    domain: result.domain,
+    domain,
+    domainSuggestion,
     defaultTopic,
     defaultStyleNote,
     sections: newSections,
