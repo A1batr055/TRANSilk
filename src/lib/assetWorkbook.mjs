@@ -347,8 +347,8 @@ ${viewXml}
 <sheetFormatPr defaultRowHeight="15"/>
 ${colsXml}
 <sheetData>${rowsXml}</sheetData>
-${mergesXml}
 ${autoFilterXml}
+${mergesXml}
 ${dataValidationsXml}
 ${headerFooterXml}
 </worksheet>`;
