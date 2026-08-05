@@ -284,7 +284,7 @@ test("custom language direction creates dynamic term fields", () => {
   assert.equal(profile.sourceLanguage, "ja-JP");
   assert.equal(profile.targetLanguage, "en-US");
   assert.deepEqual(termFields(profile), { sourceField: "ja_JP", targetField: "en_US" });
-  assert.deepEqual(reviewHeaders(profile), ["id", "日文", "英文译法", "依据", "删除", "疑似重复"]);
+  assert.deepEqual(reviewHeaders(profile), ["id", "日文", "英文译法", "领域", "依据", "删除", "疑似重复"]);
 });
 
 test("automatic source detection is disabled", () => {
@@ -346,7 +346,7 @@ test("English source translates to Chinese and applies the reversed glossary", a
 test("English source review workbook labels English as source and Chinese as target", () => {
   assert.deepEqual(
     reviewHeaders(resolveLanguageProfile("en-zh")),
-    ["id", "英文", "中文译法", "依据", "删除", "疑似重复"],
+    ["id", "英文", "中文译法", "领域", "依据", "删除", "疑似重复"],
   );
 });
 

@@ -73,7 +73,7 @@ function dataValidationsXml(dataValidations) {
   const items = dataValidations
     .map(
       (dv) =>
-        `<dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" sqref="${dv.sqref}"><formula1>"${dv.list.join(",")}"</formula1></dataValidation>`
+        `<dataValidation type="list" errorStyle="${dv.errorStyle || "stop"}" allowBlank="1" showInputMessage="1" showErrorMessage="1" sqref="${dv.sqref}"><formula1>"${dv.list.join(",")}"</formula1></dataValidation>`
     )
     .join("");
   return `<dataValidations count="${dataValidations.length}">${items}</dataValidations>`;

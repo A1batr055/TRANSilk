@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { writeSimpleWorkbook, readSimpleWorkbook } from "../lib/xlsx.mjs";
 import { termFields } from "../lib/language.mjs";
+import { listDomainLabels, PENDING_DOMAIN_LABEL, recordPendingDomain } from "../lib/domainTaxonomy.mjs";
 
 
 const DELETE_MARK = "删除";
@@ -8,7 +9,17 @@ const DELETE_MARK = "删除";
 export function reviewHeaders(config) {
   const sourceLabel = config?.sourceLabel || config?.sourceLanguage || "原文";
   const targetLabel = config?.targetLabel || config?.targetLanguage || "译文";
-  return ["id", sourceLabel, `${targetLabel}译法`, "依据", "删除", "疑似重复"];
+  return ["id", sourceLabel, `${targetLabel}译法`, "领域", "依据", "删除", "疑似重复"];
+}
+
+function colLetter(n) {
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
 }
 
 function normalizeKey(term) {
@@ -56,6 +67,7 @@ export async function exportCandidatesToWorkbook(candidates, evidence, workbookP
       c.id,
       c[sourceField],
       c[targetField],
+      c.domain || "",
       formatEvidence(bestEvidence(evidenceByCandidate, c.id)),
       "",
       duplicateHint,
@@ -63,11 +75,16 @@ export async function exportCandidatesToWorkbook(candidates, evidence, workbookP
   });
 
   const lastRow = rows.length + 1;
+  const domainCol = colLetter(headers.indexOf("领域") + 1);
+  const deleteCol = colLetter(headers.indexOf("删除") + 1);
   const buffer = await writeSimpleWorkbook({
     sheetName: "候选术语审阅",
     headers,
     rows,
-    dataValidations: [{ sqref: `E2:E${lastRow}`, list: [DELETE_MARK] }],
+    dataValidations: [
+      { sqref: `${deleteCol}2:${deleteCol}${lastRow}`, list: [DELETE_MARK] },
+      { sqref: `${domainCol}2:${domainCol}${lastRow}`, list: [...listDomainLabels(), PENDING_DOMAIN_LABEL], errorStyle: "warning" },
+    ],
   });
   fs.writeFileSync(workbookPath, buffer);
   return workbookPath;
@@ -79,6 +96,7 @@ export async function importReviewedGlossary(workbookPath, candidates, evidence 
   const idx = (name) => headers.indexOf(name);
   const byId = new Map(candidates.map((c) => [c.id, c]));
   const evidenceByCandidate = groupEvidence(evidence);
+  const domainLabels = listDomainLabels();
 
   return rows.map((row) => {
     const id = row[idx("id")];
@@ -90,6 +108,17 @@ export async function importReviewedGlossary(workbookPath, candidates, evidence 
     const deleted = row[idx("删除")]?.trim() === DELETE_MARK;
     const best = bestEvidence(evidenceByCandidate, id);
 
+    const rawDomain = row[idx("领域")]?.trim() ?? "";
+    let domain = original.domain ?? "";
+    if (rawDomain && rawDomain !== domain) {
+      if (domainLabels.includes(rawDomain) || rawDomain === PENDING_DOMAIN_LABEL) {
+        domain = rawDomain;
+      } else {
+        recordPendingDomain(rawDomain, { title: original[sourceField] ?? id });
+        domain = PENDING_DOMAIN_LABEL;
+      }
+    }
+
     return {
       id,
       [sourceField]: row[idx(sourceHeader)],
@@ -98,7 +127,7 @@ export async function importReviewedGlossary(workbookPath, candidates, evidence 
       ...(sourceField === "en_US" || targetField === "en_US" ? { en_US: sourceField === "en_US" ? row[idx(sourceHeader)] : row[idx(targetHeader)] } : {}),
       en_variants: [],
       part_of_speech: original.part_of_speech ?? "",
-      domain: original.domain ?? "",
+      domain,
       status: deleted ? "弃用" : "首选",
       definition: original.definition ?? original.definition_zh ?? "",
       note: original.note ?? original.note_zh ?? "",
