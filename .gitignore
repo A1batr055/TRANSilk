@@ -3,4 +3,5 @@ work/
 projects/
 dogfood/
 termbase/
+domain-taxonomy/pending.jsonl
 config/secrets.local.json
