@@ -29,7 +29,7 @@ export function checkOverridesAndLocal(candidates, config, projectDir) {
       });
       continue;
     }
-    const local = lookupTerm(termbaseIndex, config.sourceLanguage, c[sourceField]);
+    const local = lookupTerm(termbaseIndex, config.sourceLanguage, c[sourceField], config.domain);
     if (local) {
       evidence.push({ candidate_id: c.id, source: "local", quote: local.targetTerm, url: "" });
       continue;

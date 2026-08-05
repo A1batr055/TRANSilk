@@ -18,8 +18,8 @@ function normalizeTerm(term) {
   return String(term ?? "").trim().toLowerCase();
 }
 
-function entryKey(sourceLanguage, sourceTerm) {
-  return `${String(sourceLanguage ?? "").toLowerCase()}::${normalizeTerm(sourceTerm)}`;
+function entryKey(sourceLanguage, sourceTerm, domain) {
+  return `${String(sourceLanguage ?? "").toLowerCase()}::${normalizeTerm(sourceTerm)}::${normalizeTerm(domain)}`;
 }
 
 export function loadTermbase() {
@@ -31,20 +31,20 @@ export function loadTermbase() {
 export function buildTermbaseIndex(entries = loadTermbase()) {
   const index = new Map();
   for (const entry of entries) {
-    if (entry.sourceTerm) index.set(entryKey(entry.sourceLanguage, entry.sourceTerm), entry);
+    if (entry.sourceTerm) index.set(entryKey(entry.sourceLanguage, entry.sourceTerm, entry.domain), entry);
   }
   return index;
 }
 
-export function lookupTerm(index, sourceLanguage, sourceTerm) {
-  return index.get(entryKey(sourceLanguage, sourceTerm)) ?? null;
+export function lookupTerm(index, sourceLanguage, sourceTerm, domain) {
+  return index.get(entryKey(sourceLanguage, sourceTerm, domain)) ?? null;
 }
 
 export function mergeIntoTermbase(newEntries) {
   const index = buildTermbaseIndex();
   for (const entry of newEntries) {
     if (!entry.sourceTerm || !entry.targetTerm) continue;
-    index.set(entryKey(entry.sourceLanguage, entry.sourceTerm), entry);
+    index.set(entryKey(entry.sourceLanguage, entry.sourceTerm, entry.domain), entry);
   }
   const merged = [...index.values()];
   fs.mkdirSync(termbaseDir(), { recursive: true });

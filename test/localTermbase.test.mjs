@@ -34,18 +34,30 @@ test("mergeIntoTermbase writes entries and lookupTerm finds them by language + t
     { sourceLanguage: "zh-CN", targetLanguage: "en-US", sourceTerm: "神经网络", targetTerm: "neural network", domain: "AI" },
   ]);
   const index = buildTermbaseIndex();
-  const hit = lookupTerm(index, "zh-CN", "神经网络");
+  const hit = lookupTerm(index, "zh-CN", "神经网络", "AI");
   assert.equal(hit.targetTerm, "neural network");
-  assert.equal(lookupTerm(index, "zh-CN", "不存在"), null);
+  assert.equal(lookupTerm(index, "zh-CN", "不存在", "AI"), null);
 });
 
-test("mergeIntoTermbase dedupes by source language + term, keeping the latest value", (t) => {
+test("mergeIntoTermbase overwrites within the same domain, keeping the latest value", (t) => {
   withCleanTermbase(t);
-  mergeIntoTermbase([{ sourceLanguage: "zh-CN", targetLanguage: "en-US", sourceTerm: "算法", targetTerm: "algorithm" }]);
-  mergeIntoTermbase([{ sourceLanguage: "zh-CN", targetLanguage: "en-US", sourceTerm: "算法", targetTerm: "Algorithm" }]);
+  mergeIntoTermbase([{ sourceLanguage: "zh-CN", targetLanguage: "en-US", sourceTerm: "算法", targetTerm: "algorithm", domain: "工程技术" }]);
+  mergeIntoTermbase([{ sourceLanguage: "zh-CN", targetLanguage: "en-US", sourceTerm: "算法", targetTerm: "Algorithm", domain: "工程技术" }]);
   const entries = loadTermbase();
   assert.equal(entries.length, 1);
   assert.equal(entries[0].targetTerm, "Algorithm");
+});
+
+test("mergeIntoTermbase keeps separate senses for the same term across different domains", (t) => {
+  withCleanTermbase(t);
+  mergeIntoTermbase([{ sourceLanguage: "zh-CN", targetLanguage: "en-US", sourceTerm: "细胞", targetTerm: "cell", domain: "医学" }]);
+  mergeIntoTermbase([{ sourceLanguage: "zh-CN", targetLanguage: "en-US", sourceTerm: "细胞", targetTerm: "battery cell", domain: "工程技术" }]);
+  const entries = loadTermbase();
+  assert.equal(entries.length, 2);
+  const index = buildTermbaseIndex();
+  assert.equal(lookupTerm(index, "zh-CN", "细胞", "医学").targetTerm, "cell");
+  assert.equal(lookupTerm(index, "zh-CN", "细胞", "工程技术").targetTerm, "battery cell");
+  assert.equal(lookupTerm(index, "zh-CN", "细胞", "政务"), null);
 });
 
 test("glossaryToTermbaseEntries drops deprecated entries and maps language fields", () => {
@@ -135,7 +147,7 @@ test("importTermbaseFromPath ingests a .tbx file and skips a .tmx file with a re
   assert.equal(result.addedOrUpdated, 2);
 
   const index = buildTermbaseIndex();
-  assert.equal(lookupTerm(index, "zh-CN", "模型").targetTerm, "model");
+  assert.equal(lookupTerm(index, "zh-CN", "模型", "AI").targetTerm, "model");
 });
 
 test("checkOverridesAndLocal reports termbase hits with source \"local\" and skips web search", (t) => {

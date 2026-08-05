@@ -8,7 +8,11 @@ const DELETE_MARK = "删除";
 export function reviewHeaders(config) {
   const sourceLabel = config?.sourceLabel || config?.sourceLanguage || "原文";
   const targetLabel = config?.targetLabel || config?.targetLanguage || "译文";
-  return ["id", sourceLabel, `${targetLabel}译法`, "依据", "删除"];
+  return ["id", sourceLabel, `${targetLabel}译法`, "依据", "删除", "疑似重复"];
+}
+
+function normalizeKey(term) {
+  return String(term ?? "").normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function groupEvidence(evidence) {
@@ -37,13 +41,26 @@ export async function exportCandidatesToWorkbook(candidates, evidence, workbookP
   const headers = reviewHeaders(config);
   const { sourceField, targetField } = termFields(config);
 
-  const rows = candidates.map((c) => [
-    c.id,
-    c[sourceField],
-    c[targetField],
-    formatEvidence(bestEvidence(evidenceByCandidate, c.id)),
-    "",
-  ]);
+  const groups = new Map();
+  for (const c of candidates) {
+    const key = `${normalizeKey(c[sourceField])}|${normalizeKey(c[targetField])}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c.id);
+  }
+
+  const rows = candidates.map((c) => {
+    const key = `${normalizeKey(c[sourceField])}|${normalizeKey(c[targetField])}`;
+    const group = groups.get(key);
+    const duplicateHint = group.length > 1 ? `疑似重复于 ${group.filter((id) => id !== c.id).join("、")}` : "";
+    return [
+      c.id,
+      c[sourceField],
+      c[targetField],
+      formatEvidence(bestEvidence(evidenceByCandidate, c.id)),
+      "",
+      duplicateHint,
+    ];
+  });
 
   const lastRow = rows.length + 1;
   const buffer = await writeSimpleWorkbook({
