@@ -12,7 +12,7 @@ import { verifyCandidates } from "./stages/03-verify.mjs";
 import { exportCandidatesToWorkbook, importReviewedGlossary } from "./stages/04-freeze.mjs";
 import { translateWithGlossary } from "./stages/05-translate.mjs";
 import { importTermbaseFromPath, mergeIntoTermbase, glossaryToTermbaseEntries } from "./lib/localTermbase.mjs";
-import { loadPendingDomains, addDomain, recordPendingDomain, PENDING_DOMAIN_LABEL } from "./lib/domainTaxonomy.mjs";
+import { loadPendingDomains, addDomain, recordPendingDomain, listDomainLabels, PENDING_DOMAIN_LABEL } from "./lib/domainTaxonomy.mjs";
 import { checkForUpdates } from "./lib/selfUpdate.mjs";
 import { runBuildAndValidate } from "./stages/08-build.mjs";
 import { checkRealization, writeCheckReport } from "./stages/07-check.mjs";
@@ -35,6 +35,7 @@ const USAGE =
   "  transilk import-termbase <TBX文件或目录>   # 导入本地术语库，供 Stage 3 机械命中\n" +
   "  transilk list-pending-domains   # 查看 Stage 1 归不进封闭词表、待人工确认的领域建议\n" +
   "  transilk add-domain <领域名>   # 把领域名加入封闭词表\n" +
+  "  transilk reclassify-domain <项目目录> <新领域名>   # 把已有项目的 domain 改成封闭词表内的值\n" +
   "  transilk check-update   # 检查并拉取上游更新（仅在可快进合并时才会更新）";
 
 const COMMANDS = {
@@ -46,6 +47,7 @@ const COMMANDS = {
   "import-termbase": runImportTermbase,
   "list-pending-domains": runListPendingDomains,
   "add-domain": runAddDomain,
+  "reclassify-domain": runReclassifyDomain,
   "check-update": runCheckUpdate,
 };
 
@@ -117,6 +119,17 @@ async function main() {
 
   if (command === "check-update") {
     await runCheckUpdate();
+    return;
+  }
+
+  if (command === "reclassify-domain") {
+    const [projectDirArg, newLabel] = rest;
+    if (!projectDirArg || !newLabel) {
+      console.error(USAGE);
+      process.exitCode = 1;
+      return;
+    }
+    await runReclassifyDomain(path.resolve(projectDirArg), newLabel);
     return;
   }
 
@@ -336,6 +349,18 @@ async function runListPendingDomains() {
 async function runAddDomain(label) {
   const total = addDomain(label);
   console.log(`已加入封闭词表："${label}"（当前共 ${total} 项）。`);
+}
+
+async function runReclassifyDomain(projectDir, newLabel) {
+  const trimmed = String(newLabel ?? "").trim();
+  if (!listDomainLabels().includes(trimmed)) {
+    throw new Error(`"${trimmed}"不在封闭词表内，请先用 add-domain 加入`);
+  }
+  const config = readAssetConfig(projectDir);
+  const oldDomain = config.domain;
+  config.domain = trimmed;
+  writeAssetConfig(projectDir, config);
+  console.log(`已将 ${path.basename(projectDir)} 的 domain 从"${oldDomain}"改为"${trimmed}"。`);
 }
 
 async function runCheckUpdate() {
