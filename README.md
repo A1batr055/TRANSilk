@@ -94,6 +94,18 @@ Stage 3查证按 本地 > 联网 > 模型知识 的优先级取证；本地术�
 调用模型。在TUI首页选择「导入本地术语库」，导入TBX格式的术语文件或所在目录；
 Stage 4确认术语后会自动写回本地术语库，供后续项目复用。
 
+**领域分类**
+
+Stage 1会给项目自动标注一个领域（domain），用于本地术语库区分同词不同义（例如同一个原文词在
+军事和企业管理两个领域下译法可以不同）。领域从封闭词表中选取，模型不会自造新词；选不出合适项
+时标记为「待归类」并记录建议，可在TUI首页「领域词表管理」或命令行查看、转正。
+
+**检查更新**
+
+TUI首页「检查更新」（或命令行`transilk check-update`）拉取上游仓库最新提交，仅当本地可无冲突
+快进合并时才自动拉取；本地与远端历史分叉时不会自动合并，会提示手动处理。此操作需要能访问
+GitHub，网络受限环境需自行配置代理（如设置`HTTP_PROXY`/`HTTPS_PROXY`环境变量）。
+
 **使用订阅账号（Claude Code CLI／Codex CLI）**
 
 无需模型API key，仅凭Claude或Codex订阅账号即可运行，用量计入订阅账号自身额度，
@@ -154,6 +166,14 @@ node src/cli.mjs archive ./my-project
 
 # 6. 可选：导入本地术语库（TBX 文件或目录，与项目无关，随时可执行）
 node src/cli.mjs import-termbase ./my-termbase.tbx
+
+# 7. 可选：领域词表治理（与项目无关，随时可执行）
+node src/cli.mjs list-pending-domains          # 查看待归类的领域建议
+node src/cli.mjs add-domain "生活方式"          # 把领域名转正进封闭词表
+node src/cli.mjs reclassify-domain ./my-project "信息技术"   # 修正已有项目的domain
+
+# 8. 可选：检查并拉取上游更新
+node src/cli.mjs check-update
 ```
 
 `bootstrap` 支持 `--target` 附带已有译文。查看版本：`transilk --version`。
