@@ -8,6 +8,7 @@ import { ingestRawDocument } from "./rawIngest.mjs";
 import { assetConfigPath, writeAssetConfig } from "./assetConfig.mjs";
 import { workDirFor } from "./paths.mjs";
 import { resolveLanguageProfile } from "./language.mjs";
+import { assertHasSegments } from "./segment.mjs";
 
 const MATERIAL_DIR = "01_原始材料";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -73,6 +74,7 @@ export function bootstrapFromLegacyXls({ xlsPath, projectDir, title, segmentPref
   const { source } = stageProjectMaterials({ sourcePath: xlsPath, projectDir });
   const rows = readLegacyXlsRows(source.copiedPath);
   const { segments, sections } = extractSegmentsFromRows(rows, segmentPrefix);
+  assertHasSegments(segments, source.copiedPath);
   const language = resolveLanguageProfile(direction, segments);
 
   const config = {
@@ -124,6 +126,7 @@ export async function bootstrapFromRawDocument({ sourcePath, targetPath, project
     targetPath: materials.target?.copiedPath,
     segmentPrefix,
   });
+  assertHasSegments(segments, materials.source.copiedPath);
   const language = resolveLanguageProfile(direction, segments);
 
   const config = {

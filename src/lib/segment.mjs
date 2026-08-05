@@ -15,6 +15,12 @@ export function loadPlainTextSegments(filePath, prefix) {
   }));
 }
 
+export function assertHasSegments(segments, sourcePath) {
+  if (segments.length === 0) {
+    throw new Error(`未能从源文件中提取到任何句段，请确认文件内容非空：${sourcePath}`);
+  }
+}
+
 export function assertSegmentCount(segments, expected) {
   if (segments.length !== expected) {
     throw new Error(
