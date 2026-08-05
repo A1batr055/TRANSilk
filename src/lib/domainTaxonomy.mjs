@@ -12,6 +12,10 @@ export function domainTaxonomyPath() {
   return path.join(domainTaxonomyDir(), "domains.jsonl");
 }
 
+export function domainTaxonomyLocalPath() {
+  return path.join(domainTaxonomyDir(), "domains.local.jsonl");
+}
+
 export function pendingDomainsPath() {
   return path.join(domainTaxonomyDir(), "pending.jsonl");
 }
@@ -30,8 +34,14 @@ export function loadDomains() {
   return readJsonl(domainTaxonomyPath());
 }
 
+export function loadLocalDomains() {
+  return readJsonl(domainTaxonomyLocalPath());
+}
+
 export function listDomainLabels() {
-  return loadDomains().map((d) => d.label);
+  const seedLabels = loadDomains().map((d) => d.label);
+  const localLabels = loadLocalDomains().map((d) => d.label);
+  return [...new Set([...seedLabels, ...localLabels])];
 }
 
 export function addDomain(label) {
@@ -39,7 +49,7 @@ export function addDomain(label) {
   if (!trimmed) throw new Error("领域名不能为空");
   const existing = listDomainLabels();
   if (existing.includes(trimmed)) return existing.length;
-  appendJsonl(domainTaxonomyPath(), { label: trimmed });
+  appendJsonl(domainTaxonomyLocalPath(), { label: trimmed });
   return existing.length + 1;
 }
 
