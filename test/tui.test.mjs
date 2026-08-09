@@ -483,6 +483,27 @@ test("project screen keeps all eight stages visible", () => {
   view.unmount();
 });
 
+test("target language picker clears the source language search", async () => {
+  const view = render(React.createElement(App, appProps));
+  view.stdin.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  view.stdin.write("source.txt");
+  view.stdin.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  view.stdin.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  view.stdin.write("英语");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.match(view.lastFrame(), /英语（en-US）/);
+  assert.doesNotMatch(view.lastFrame(), /中文（zh-CN）/);
+  view.stdin.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.match(view.lastFrame(), /选择目标语/);
+  assert.match(view.lastFrame(), /中文（zh-CN）/);
+  assert.match(view.lastFrame(), /输入中文、英文名或语言代码/);
+  view.unmount();
+});
+
 test("project screen exposes the optional project override workbook before preparation", () => {
   const stages = ["文本分析", "术语抽取", "术语查证", "人工确认", "翻译", "译后编辑", "术语核查", "交付"]
     .map((name, index) => ({ number: index + 1, name, complete: false, current: index === 0 }));

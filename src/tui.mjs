@@ -536,6 +536,7 @@ function CreateWizard({ onComplete, onBack }) {
 
   if (step === 2) {
     return h(LanguagePicker, {
+      key: "source-language",
       title: "选择源语",
       options: LANGUAGE_OPTIONS,
       onSelect: (sourceLanguage) => { setValues({ ...values, sourceLanguage }); setStep(3); },
@@ -563,6 +564,7 @@ function CreateWizard({ onComplete, onBack }) {
 
   if (step === 3) {
     return h(LanguagePicker, {
+      key: "target-language",
       title: "选择目标语",
       options: LANGUAGE_OPTIONS,
       onSelect: (targetLanguage) => { setValues({ ...values, targetLanguage }); setStep(4); },

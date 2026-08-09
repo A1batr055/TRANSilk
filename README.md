@@ -10,6 +10,8 @@
 
 在术语确认与译后编辑（PE）两处保留人工判断；除模型调用和联网查证外，全部在本地运行。
 
+![TRANSilk TUI 总览](docs/assets/transilk-overview.gif)
+
 ## 前置条件
 
 - Node.js 22或更高版本。
@@ -46,6 +48,10 @@
 ## 使用方法
 
 ### 图形界面（TUI）
+
+| 首页 | 项目页 |
+|---|---|
+| ![TRANSilk 首页](docs/assets/tui-home.png) | ![TRANSilk 项目页](docs/assets/tui-project.png) |
 
 1. 新建项目，选择原始材料。
 2. 选择翻译方向和模型。
