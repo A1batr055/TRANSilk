@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import React from "react";
 import { render } from "ink-testing-library";
-import { App, ConfigWizard, ModelSwitch, ProjectList, ProjectView } from "../src/tui.mjs";
+import { App, ConfigWizard, DomainPendingEditScreen, DomainTaxonomyScreen, ModelSwitch, ProjectList, ProjectView } from "../src/tui.mjs";
 import { listAvailableModels } from "../src/lib/modelCatalog.mjs";
 import { normalizeInputPath, projectSlug } from "../src/lib/tuiState.mjs";
 import { detectDirection, resolveLanguageProfile, termFields } from "../src/lib/language.mjs";
@@ -169,6 +169,42 @@ test("default TUI entry stays on the home screen without model configuration", (
   }));
   assert.match(view.lastFrame(), /多语言翻译 · A1batr055/);
   assert.doesNotMatch(view.lastFrame(), /选择模型服务商/);
+  view.unmount();
+});
+
+test("domain taxonomy TUI exposes pending review and editable files", async () => {
+  let selectedIndex = null;
+  const view = render(React.createElement(DomainTaxonomyScreen, {
+    domains: ["法律", "财经"],
+    pending: [{ suggestion: "商务资料", title: "法律财经领域稿件", date: "2026-08-09" }],
+    notice: null,
+    onSelectPending: (index) => { selectedIndex = index; },
+    onAdd: () => {},
+    onOpen: () => {},
+    onRefresh: () => {},
+    onBack: () => {},
+  }));
+  assert.match(view.lastFrame(), /待处理 · 商务资料 · 法律财经领域稿件/);
+  assert.match(view.lastFrame(), /打开个人领域词表（可直接编辑）/);
+  assert.match(view.lastFrame(), /打开待归类记录（可直接编辑）/);
+  assert.match(view.lastFrame(), /打开内置领域词表（随版本更新）/);
+  view.stdin.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(selectedIndex, 0);
+  view.unmount();
+});
+
+test("pending-domain editor starts with the model suggestion and shows duplicate failure", () => {
+  const view = render(React.createElement(DomainPendingEditScreen, {
+    entry: { suggestion: "商务资料" },
+    notice: { kind: "error", text: "领域“商务”已存在；待归类记录未改动。" },
+    onSubmit: () => {},
+    onBack: () => {},
+  }));
+  assert.match(view.lastFrame(), /收录名称/);
+  assert.match(view.lastFrame(), /商务资料/);
+  assert.match(view.lastFrame(), /商务.*已存在/);
+  assert.match(view.lastFrame(), /待归类记录未改动/);
   view.unmount();
 });
 

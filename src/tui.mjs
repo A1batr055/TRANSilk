@@ -8,7 +8,17 @@ import { deleteProject, inspectProject, listProjects, normalizeInputPath, projec
 import { clearModelConfig, hasModelConfig, modelConfigSummary, MODEL_PRESETS, readModelConfig, saveModelConfig } from "./lib/configWizard.mjs";
 import { listAvailableModels } from "./lib/modelCatalog.mjs";
 import { LANGUAGE_OPTIONS } from "./lib/language.mjs";
-import { listDomainLabels, loadPendingDomains, addDomain } from "./lib/domainTaxonomy.mjs";
+import {
+  acceptPendingDomain,
+  addDomain,
+  dismissPendingDomain,
+  domainTaxonomyLocalPath,
+  domainTaxonomyPath,
+  ensureDomainTaxonomyFiles,
+  listDomainLabels,
+  loadPendingDomains,
+  pendingDomainsPath,
+} from "./lib/domainTaxonomy.mjs";
 import { checkForUpdates } from "./lib/selfUpdate.mjs";
 
 const h = React.createElement;
@@ -193,18 +203,72 @@ function ImportTermbasePath({ onSubmit, onBack }) {
   );
 }
 
-function DomainTaxonomyScreen({ domains, pending, onSubmit, onBack }) {
+export function DomainTaxonomyScreen({ domains, pending, notice, onSelectPending, onAdd, onOpen, onRefresh, onBack }) {
+  const items = [
+    ...pending.map((entry, index) => ({
+      value: `pending:${index}`,
+      label: `待处理 · ${entry.suggestion}${entry.title ? ` · ${entry.title}` : ""}`,
+    })),
+    { value: "add", label: "＋ 手动新增领域" },
+    { value: "open-local", label: "打开个人领域词表（可直接编辑）" },
+    { value: "open-pending", label: "打开待归类记录（可直接编辑）" },
+    { value: "open-seed", label: "打开内置领域词表（随版本更新）" },
+    { value: "refresh", label: "刷新词表" },
+  ];
   return h(
     Frame,
-    { title: "领域词表管理", subtitle: `已收录 ${domains.length} 项` },
-    h(Box, { flexDirection: "column", marginBottom: 1 },
-      pending.length === 0
-        ? h(Text, { dimColor: true }, "暂无待归类记录。")
-        : pending.map((p, i) => h(Text, { key: i, dimColor: true }, `[${p.date}] ${p.title}：${p.suggestion}`)),
-    ),
+    { title: "领域词表管理", subtitle: `已收录 ${domains.length} 项 · 待处理 ${pending.length} 项` },
+    notice ? h(Box, { marginBottom: 1 }, h(Text, { color: notice.kind === "error" ? "red" : "green" }, notice.text)) : null,
+    pending.length === 0 ? h(Box, { marginBottom: 1 }, h(Text, { dimColor: true }, "暂无待归类记录。")) : null,
+    h(Menu, {
+      items,
+      onSelect: (item) => {
+        if (item.value.startsWith("pending:")) onSelectPending(Number(item.value.split(":")[1]));
+        else if (item.value === "add") onAdd();
+        else if (item.value === "refresh") onRefresh();
+        else onOpen(item.value);
+      },
+      onBack,
+    }),
+    h(Hint, null, "个人词表适合长期自定义；外部编辑后请选择“刷新词表”。"),
+  );
+}
+
+function DomainAddScreen({ onSubmit, onBack }) {
+  return h(
+    Frame,
+    { title: "手动新增领域", subtitle: "写入个人领域词表" },
+    h(TextEntry, { label: "领域名", placeholder: "例如：医学", onSubmit, onBack }),
+  );
+}
+
+function DomainPendingScreen({ entry, onAccept, onDismiss, onBack }) {
+  return h(
+    Frame,
+    { title: "处理待归类领域", subtitle: entry.suggestion },
+    h(Text, null, `建议领域：${entry.suggestion}`),
+    h(Text, { dimColor: true }, `来源：${entry.title || "未记录"}${entry.date ? ` · ${entry.date}` : ""}`),
+    h(Box, { marginTop: 1 }, h(Menu, {
+      items: [
+        { value: "accept", label: "修改名称后收录到个人词表" },
+        { value: "dismiss", label: "驳回并移出待归类" },
+        { value: "back", label: "返回" },
+      ],
+      onSelect: (item) => item.value === "accept" ? onAccept() : item.value === "dismiss" ? onDismiss() : onBack(),
+      onBack,
+    })),
+  );
+}
+
+export function DomainPendingEditScreen({ entry, notice, onSubmit, onBack }) {
+  return h(
+    Frame,
+    { title: "修改后收录", subtitle: "原待归类记录会在成功后移除" },
+    notice ? h(Box, { marginBottom: 1 }, h(Text, { color: notice.kind === "error" ? "red" : "green" }, notice.text)) : null,
     h(TextEntry, {
-      label: "新增领域名（收进封闭词表）",
-      placeholder: "例如：医学",
+      label: "收录名称",
+      initial: entry.suggestion,
+      placeholder: "请输入领域名",
       onSubmit,
       onBack,
     }),
@@ -688,6 +752,7 @@ export function App({ initialScreen, initialModel } = {}) {
   const [pending, setPending] = useState(null);
   const [switchConfig, setSwitchConfig] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [pendingDomainIndex, setPendingDomainIndex] = useState(null);
   const project = useMemo(() => projectDir ? inspectProject(projectDir) : null, [projectDir, projects, running]);
 
   const refresh = useCallback(() => setProjects(listProjects()), []);
@@ -871,17 +936,102 @@ export function App({ initialScreen, initialModel } = {}) {
     return h(DomainTaxonomyScreen, {
       domains: listDomainLabels(),
       pending: loadPendingDomains(),
+      notice,
       onBack: () => setScreen("home"),
+      onSelectPending: (index) => { setPendingDomainIndex(index); setNotice(null); setScreen("domain-pending"); },
+      onAdd: () => { setNotice(null); setScreen("domain-add"); },
+      onRefresh: () => setNotice({ kind: "success", text: "领域词表已重新读取。" }),
+      onOpen: (action) => {
+        try {
+          ensureDomainTaxonomyFiles();
+          const filePath = action === "open-local"
+            ? domainTaxonomyLocalPath()
+            : action === "open-pending" ? pendingDomainsPath() : domainTaxonomyPath();
+          openPath(filePath);
+          setNotice({ kind: "success", text: `已打开：${filePath}` });
+        } catch (error) {
+          setNotice({ kind: "error", text: error.message });
+        }
+      },
+    });
+  }
+  if (screen === "domain-add") {
+    return h(DomainAddScreen, {
+      onBack: () => setScreen("domain-taxonomy"),
       onSubmit: (input) => {
         try {
           const label = input.trim();
           if (!label) throw new Error("请输入领域名。");
           const total = addDomain(label);
-          setNotice({ kind: "success", text: `已加入封闭词表："${label}"（当前共 ${total} 项）。` });
+          setNotice({ kind: "success", text: `已加入个人词表：“${label}”（当前共 ${total} 项）。` });
+          setScreen("domain-taxonomy");
         } catch (error) {
           setNotice({ kind: "error", text: error.message });
         }
-        setScreen("home");
+      },
+    });
+  }
+  if (screen === "domain-pending" && pendingDomainIndex !== null) {
+    const entry = loadPendingDomains()[pendingDomainIndex];
+    if (!entry) {
+      return h(Frame, { title: "处理待归类领域", subtitle: "记录已变化" },
+        h(Text, { color: "yellow" }, "该待归类记录已不存在，可能已在外部编辑器中删除。"),
+        h(Box, { marginTop: 1 }, h(Menu, {
+          items: [{ value: "back", label: "返回并刷新词表" }],
+          onSelect: () => { setPendingDomainIndex(null); setNotice(null); setScreen("domain-taxonomy"); },
+          onBack: () => { setPendingDomainIndex(null); setNotice(null); setScreen("domain-taxonomy"); },
+        })),
+      );
+    }
+    const finish = (action) => {
+      try {
+        if (action === "accept") {
+          const result = acceptPendingDomain(pendingDomainIndex);
+          setNotice({ kind: "success", text: `已收录“${result.entry.suggestion}”（当前共 ${result.total} 项）。` });
+        } else {
+          const removed = dismissPendingDomain(pendingDomainIndex);
+          setNotice({ kind: "success", text: `已驳回“${removed.suggestion}”。` });
+        }
+      } catch (error) {
+        setNotice({ kind: "error", text: error.message });
+      }
+      setPendingDomainIndex(null);
+      setScreen("domain-taxonomy");
+    };
+    return h(DomainPendingScreen, {
+      entry,
+      onAccept: () => { setNotice(null); setScreen("domain-pending-edit"); },
+      onDismiss: () => finish("dismiss"),
+      onBack: () => { setPendingDomainIndex(null); setScreen("domain-taxonomy"); },
+    });
+  }
+  if (screen === "domain-pending-edit" && pendingDomainIndex !== null) {
+    const entry = loadPendingDomains()[pendingDomainIndex];
+    if (!entry) {
+      return h(Frame, { title: "修改后收录", subtitle: "记录已变化" },
+        h(Text, { color: "yellow" }, "该待归类记录已不存在，无法继续收录。"),
+        h(Box, { marginTop: 1 }, h(Menu, {
+          items: [{ value: "back", label: "返回并刷新词表" }],
+          onSelect: () => { setPendingDomainIndex(null); setNotice(null); setScreen("domain-taxonomy"); },
+          onBack: () => { setPendingDomainIndex(null); setNotice(null); setScreen("domain-taxonomy"); },
+        })),
+      );
+    }
+    return h(DomainPendingEditScreen, {
+      entry,
+      notice,
+      onBack: () => { setNotice(null); setScreen("domain-pending"); },
+      onSubmit: (input) => {
+        try {
+          const label = input.trim();
+          if (!label) throw new Error("请输入领域名。");
+          const result = acceptPendingDomain(pendingDomainIndex, { label });
+          setNotice({ kind: "success", text: `已将“${result.entry.suggestion}”修改为“${result.label}”并收录（当前共 ${result.total} 项）。` });
+          setPendingDomainIndex(null);
+          setScreen("domain-taxonomy");
+        } catch (error) {
+          setNotice({ kind: "error", text: `${error.message}；待归类记录未改动。` });
+        }
       },
     });
   }
