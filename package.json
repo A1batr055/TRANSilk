@@ -1,6 +1,6 @@
 {
   "name": "transilk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "术语先查证、译者钉在中间的中英互译流水线。",
