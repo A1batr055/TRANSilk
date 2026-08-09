@@ -6,7 +6,7 @@ import React from "react";
 import { render } from "ink-testing-library";
 import { App, ConfigWizard, DomainPendingEditScreen, DomainTaxonomyScreen, ModelSwitch, ProjectList, ProjectView } from "../src/tui.mjs";
 import { listAvailableModels } from "../src/lib/modelCatalog.mjs";
-import { normalizeInputPath, projectSlug } from "../src/lib/tuiState.mjs";
+import { inspectProject, normalizeInputPath, projectSlug } from "../src/lib/tuiState.mjs";
 import { detectDirection, resolveLanguageProfile, termFields } from "../src/lib/language.mjs";
 import { extractCandidates } from "../src/stages/02-extract.mjs";
 import { translateWithGlossary } from "../src/stages/05-translate.mjs";
@@ -15,6 +15,7 @@ import { checkRealization } from "../src/stages/07-check.mjs";
 import { bootstrapFromRawDocument } from "../src/lib/bootstrapProject.mjs";
 import { resolveSourceSegments, targetXlsOutputPath } from "../src/lib/sourceAdapter.mjs";
 import { readDocumentParagraphs } from "../src/lib/docReader.mjs";
+import { RUNTIME_TEMP_ROOT } from "../src/lib/paths.mjs";
 
 const appProps = { initialScreen: "home", initialModel: { configured: true, label: "测试模型" } };
 
@@ -320,7 +321,7 @@ test("custom language direction creates dynamic term fields", () => {
   assert.equal(profile.sourceLanguage, "ja-JP");
   assert.equal(profile.targetLanguage, "en-US");
   assert.deepEqual(termFields(profile), { sourceField: "ja_JP", targetField: "en_US" });
-  assert.deepEqual(reviewHeaders(profile), ["id", "日文", "英文译法", "领域", "依据", "删除", "疑似重复"]);
+  assert.deepEqual(reviewHeaders(profile), ["id", "日文", "英文译法", "领域", "依据", "来源 URL", "删除", "疑似重复"]);
 });
 
 test("automatic source detection is disabled", () => {
@@ -382,7 +383,7 @@ test("English source translates to Chinese and applies the reversed glossary", a
 test("English source review workbook labels English as source and Chinese as target", () => {
   assert.deepEqual(
     reviewHeaders(resolveLanguageProfile("en-zh")),
-    ["id", "英文", "中文译法", "领域", "依据", "删除", "疑似重复"],
+    ["id", "英文", "中文译法", "领域", "依据", "来源 URL", "删除", "疑似重复"],
   );
 });
 
@@ -395,6 +396,7 @@ test("project screen keeps all eight stages visible", () => {
     stages,
     archived: false,
     config: { sourceColumnLabel: "英文原文", targetColumnLabel: "中文译文" },
+    evidenceSummary: { local: 2, webSearch: 3, modelKnowledge: 1, webNotFound: 0, webError: 1 },
   };
   const view = render(React.createElement(ProjectView, {
     project,
@@ -406,5 +408,44 @@ test("project screen keeps all eight stages visible", () => {
     assert.match(view.lastFrame(), new RegExp(`Stage ${number}`));
   }
   assert.match(view.lastFrame(), /删除项目/);
+  assert.match(view.lastFrame(), /查证闸门：本地 → 联网查证 → 模型知识/);
+  assert.match(view.lastFrame(), /本地 2｜联网查证 3（交叉查证 0｜单一来源 3）｜模型知识 1/);
+  assert.match(view.lastFrame(), /模型知识入口：联网未检出 0｜联网失败 1/);
   view.unmount();
+});
+
+test("project inspection reloads the persisted verification summary", (t) => {
+  fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
+  const projectDir = fs.mkdtempSync(path.join(RUNTIME_TEMP_ROOT, "tui-summary-"));
+  const projectName = path.basename(projectDir);
+  const configDir = path.join(projectDir, "99_项目配置与术语源数据");
+  const workDir = path.join(process.cwd(), "work", projectName);
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.mkdirSync(workDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, "asset-config.json"), JSON.stringify({
+    title: "查证摘要测试",
+    domain: "翻译技术",
+    sourceColumnLabel: "原文",
+    targetColumnLabel: "译文",
+    workbookName: "候选术语审阅.xlsx",
+  }), "utf8");
+  fs.writeFileSync(path.join(workDir, "evidence.jsonl"), [
+    JSON.stringify({ candidate_id: "c1", source: "local", quote: "local", url: "" }),
+    JSON.stringify({ candidate_id: "c2", source: "model_knowledge", quote: "[联网未检出][中]模型知识", url: "" }),
+  ].join("\n") + "\n", "utf8");
+  t.after(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(workDir, { recursive: true, force: true });
+  });
+
+  const project = inspectProject(projectDir);
+  assert.deepEqual(project.evidenceSummary, {
+    local: 1,
+    webSearch: 0,
+    webCrossChecked: 0,
+    webSingleSource: 0,
+    modelKnowledge: 1,
+    webNotFound: 1,
+    webError: 0,
+  });
 });

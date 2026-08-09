@@ -9,7 +9,7 @@ const DELETE_MARK = "删除";
 export function reviewHeaders(config) {
   const sourceLabel = config?.sourceLabel || config?.sourceLanguage || "原文";
   const targetLabel = config?.targetLabel || config?.targetLanguage || "译文";
-  return ["id", sourceLabel, `${targetLabel}译法`, "领域", "依据", "删除", "疑似重复"];
+  return ["id", sourceLabel, `${targetLabel}译法`, "领域", "依据", "来源 URL", "删除", "疑似重复"];
 }
 
 function colLetter(n) {
@@ -43,8 +43,18 @@ function bestEvidence(evidenceByCandidate, candidateId) {
 
 function formatEvidence(ev) {
   if (!ev) return "（无出处）";
-  const quote = (ev.quote ?? "").slice(0, 60);
-  return `[${ev.source}] ${quote}`;
+  const quote = (ev.quote ?? "").slice(0, 120);
+  const level = ev.source === "web_search"
+    ? ev.verification_level === "cross_checked" ? "·交叉查证" : "·单一来源"
+    : "";
+  return `[${ev.source}${level}] ${quote}`;
+}
+
+function evidenceUrls(ev) {
+  if (!ev) return "";
+  const urls = (ev.sources ?? []).map((item) => item?.url).filter(Boolean);
+  if (!urls.length && ev.url) urls.push(ev.url);
+  return [...new Set(urls)].join("\n");
 }
 
 export async function exportCandidatesToWorkbook(candidates, evidence, workbookPath, config) {
@@ -63,12 +73,14 @@ export async function exportCandidatesToWorkbook(candidates, evidence, workbookP
     const key = `${normalizeKey(c[sourceField])}|${normalizeKey(c[targetField])}`;
     const group = groups.get(key);
     const duplicateHint = group.length > 1 ? `疑似重复于 ${group.filter((id) => id !== c.id).join("、")}` : "";
+    const best = bestEvidence(evidenceByCandidate, c.id);
     return [
       c.id,
       c[sourceField],
       c[targetField],
       c.domain || "",
-      formatEvidence(bestEvidence(evidenceByCandidate, c.id)),
+      formatEvidence(best),
+      evidenceUrls(best),
       "",
       duplicateHint,
     ];
@@ -136,6 +148,7 @@ export async function importReviewedGlossary(workbookPath, candidates, evidence 
       source_segment_id: original.source_segment_id ?? "",
       evidence_source: best?.source ?? "",
       evidence_quote: best?.quote ?? "",
+      evidence_url: evidenceUrls(best),
     };
   });
 }

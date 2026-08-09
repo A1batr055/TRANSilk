@@ -3,6 +3,7 @@ import path from "node:path";
 import { assetConfigPath } from "./assetConfig.mjs";
 import { TOOL_ROOT } from "./paths.mjs";
 import { targetOutputPath } from "./sourceAdapter.mjs";
+import { summarizeEvidence } from "./evidenceSummary.mjs";
 
 export const PROJECTS_ROOT = path.join(TOOL_ROOT, "projects");
 const WORK_ROOT = path.join(TOOL_ROOT, "work");
@@ -16,6 +17,14 @@ function readJson(filePath) {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch {
     return null;
+  }
+}
+
+function readJsonl(filePath) {
+  try {
+    return fs.readFileSync(filePath, "utf8").split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+  } catch {
+    return [];
   }
 }
 
@@ -42,6 +51,7 @@ export function inspectProject(projectDir) {
   const name = path.basename(path.resolve(projectDir));
   const workDir = path.join(TOOL_ROOT, "work", name);
   const workbookPath = path.join(workDir, config.workbookName || "候选术语审阅.xlsx");
+  const evidencePath = path.join(workDir, "evidence.jsonl");
   const glossaryPath = path.join(projectDir, "99_项目配置与术语源数据", "术语源数据.jsonl");
   const bilingualPath = path.join(workDir, "bilingual.txt");
   const reportPath = path.join(workDir, "check-report.json");
@@ -74,6 +84,8 @@ export function inspectProject(projectDir) {
     title: config.title || name,
     config,
     workDir,
+    evidencePath,
+    evidenceSummary: exists(evidencePath) ? summarizeEvidence(readJsonl(evidencePath)) : null,
     workbookPath,
     glossaryPath,
     bilingualPath,

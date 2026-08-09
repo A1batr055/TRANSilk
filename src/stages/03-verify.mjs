@@ -3,8 +3,9 @@ import path from "node:path";
 import { callModel } from "../lib/modelClient.mjs";
 import { termFields } from "../lib/language.mjs";
 import { buildTermbaseIndex, lookupTerm } from "../lib/localTermbase.mjs";
+import { searchWebEvidence } from "../lib/webSearchClient.mjs";
 
-// 联网证据必须由外部 Agent 注入；模型知识只能标记为无出处兜底。
+// 联网证据必须通过真实搜索工具事件校验；模型知识必须明确标记为无出处。
 function loadOverrides(projectDir) {
   const p = path.join(projectDir, "99_项目配置与术语源数据", "overrides.json");
   if (!fs.existsSync(p)) return {};
@@ -49,7 +50,7 @@ export function applyWebSearchResults(evidence, webResults) {
   return [...evidence, ...webResults.map((r) => ({ ...r, source: "web_search" }))];
 }
 
-export async function applyModelKnowledgeFallback(candidate, config) {
+export async function applyModelKnowledge(candidate, config) {
   const { sourceField, targetField } = termFields(config);
   const sourceLabel = config.sourceLabel || config.sourceLanguage;
   const targetLabel = config.targetLabel || config.targetLanguage;
@@ -70,7 +71,7 @@ export async function applyModelKnowledgeFallback(candidate, config) {
   };
 }
 
-export async function applyModelKnowledgeFallbackBatch(candidates, config, batchSize = 25) {
+export async function applyModelKnowledgeBatch(candidates, config, batchSize = 25) {
   const { sourceField, targetField } = termFields(config);
   const sourceLabel = config.sourceLabel || config.sourceLanguage;
   const targetLabel = config.targetLabel || config.targetLanguage;
@@ -103,13 +104,52 @@ export async function applyModelKnowledgeFallbackBatch(candidates, config, batch
   return results;
 }
 
-export async function verifyCandidates(candidates, config, projectDir, { webResults = [] } = {}) {
+export async function verifyCandidates(candidates, config, projectDir, {
+  webSearch = searchWebEvidence,
+  modelKnowledge = applyModelKnowledgeBatch,
+  onProgress = () => {},
+} = {}) {
   const { evidence: base, needsWebSearch } = checkOverridesAndLocal(candidates, config, projectDir);
+  onProgress({
+    step: "local",
+    total: candidates.length,
+    found: base.length,
+    remaining: needsWebSearch.length,
+  });
+  const searchResults = await webSearch(needsWebSearch, config);
+  const webResults = searchResults
+    .filter((result) => result.status === "found")
+    .map((result) => ({
+      candidate_id: result.candidate_id,
+      quote: result.quote,
+      url: result.url,
+      sources: result.sources ?? [],
+      searched_sources: result.searched_sources ?? [],
+      verification_level: result.verification_level ?? "single_source",
+    }));
   const withWeb = applyWebSearchResults(base, webResults);
   const stillUnresolved = needsWebSearch.filter(
     (c) => !webResults.some((r) => r.candidate_id === c.id)
   );
+  onProgress({
+    step: "web",
+    total: needsWebSearch.length,
+    found: webResults.length,
+    notFound: searchResults.filter((result) => result.status === "not_found").length,
+    error: searchResults.filter((result) => result.status === "error").length,
+    remaining: stillUnresolved.length,
+  });
 
-  const fallbacks = await applyModelKnowledgeFallbackBatch(stillUnresolved, config);
-  return [...withWeb, ...fallbacks];
+  const knowledgeResults = stillUnresolved.length ? await modelKnowledge(stillUnresolved, config) : [];
+  const searchById = new Map(searchResults.map((result) => [result.candidate_id, result]));
+  for (const knowledge of knowledgeResults) {
+    const search = searchById.get(knowledge.candidate_id);
+    if (search?.status === "not_found") {
+      const reason = search.reason ? `：${search.reason}` : "";
+      knowledge.quote = `[联网未检出${reason}]${knowledge.quote}`;
+    }
+    if (search?.status === "error") knowledge.quote = `[联网失败：${search.error}]${knowledge.quote}`;
+  }
+  onProgress({ step: "model_knowledge", total: stillUnresolved.length, found: knowledgeResults.length });
+  return [...withWeb, ...knowledgeResults];
 }

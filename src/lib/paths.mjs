@@ -5,7 +5,14 @@ import crypto from "node:crypto";
 import url from "node:url";
 
 export const TOOL_ROOT = path.dirname(path.dirname(path.dirname(url.fileURLToPath(import.meta.url))));
-export const RUNTIME_TEMP_ROOT = path.join(os.tmpdir(), "TRANSilk");
+export const RUNTIME_TEMP_ROOT = process.platform === "win32"
+  ? "D:\\CodexWorkspace\\Temp\\TRANSilk"
+  : path.join(os.tmpdir(), "TRANSilk");
+
+export function runtimeTempDir(prefix) {
+  fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
+  return fs.mkdtempSync(path.join(RUNTIME_TEMP_ROOT, `${prefix}-`));
+}
 
 export function runtimeTempFile(prefix, extension) {
   fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });

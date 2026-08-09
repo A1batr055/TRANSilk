@@ -20,6 +20,7 @@ import { parseBilingualTxt, writeBilingualTxt, assertIdSetMatches } from "./lib/
 import fs from "node:fs";
 import { launchTui } from "./tui.mjs";
 import { fileURLToPath } from "node:url";
+import { formatEvidenceSummary, summarizeEvidence } from "./lib/evidenceSummary.mjs";
 
 const [, , command, ...rest] = process.argv;
 
@@ -198,13 +199,29 @@ async function runPrep(projectDir) {
   );
   console.log(`Stage 2 完成：候选术语 ${candidates.length} 条`);
 
-  const evidence = await verifyCandidates(candidates, analyzed, projectDir);
+  const evidence = await verifyCandidates(candidates, analyzed, projectDir, {
+    onProgress(progress) {
+      if (progress.step === "local") {
+        console.log(`Stage 3/本地术语库：命中 ${progress.found}｜进入联网查证 ${progress.remaining}`);
+      }
+      if (progress.step === "web") {
+        console.log(`Stage 3/联网查证：查到 ${progress.found}｜未检出 ${progress.notFound}｜失败 ${progress.error}`);
+      }
+      if (progress.step === "model_knowledge") {
+        console.log(`Stage 3/模型知识：处理 ${progress.found}`);
+      }
+    },
+  });
   fs.writeFileSync(
     path.join(workDir, "evidence.jsonl"),
     evidence.map((e) => JSON.stringify(e)).join("\n") + "\n",
     "utf8"
   );
-  console.log(`Stage 3 完成：查证记录 ${evidence.length} 条`);
+  const evidenceSummary = summarizeEvidence(evidence);
+  console.log(`Stage 3 完成：${formatEvidenceSummary(evidenceSummary)}`);
+  if (evidenceSummary.modelKnowledge > 0) {
+    console.log(`模型知识入口：联网未检出 ${evidenceSummary.webNotFound}｜联网失败 ${evidenceSummary.webError}`);
+  }
 
   const workbookPath = path.join(workDir, analyzed.workbookName || "候选术语审阅.xlsx");
   await exportCandidatesToWorkbook(candidates, evidence, workbookPath, analyzed);

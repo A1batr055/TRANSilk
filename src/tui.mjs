@@ -7,6 +7,7 @@ import { TOOL_ROOT } from "./lib/paths.mjs";
 import { deleteProject, inspectProject, listProjects, normalizeInputPath, projectDirForTitle } from "./lib/tuiState.mjs";
 import { clearModelConfig, hasModelConfig, modelConfigSummary, MODEL_PRESETS, readModelConfig, saveModelConfig } from "./lib/configWizard.mjs";
 import { listAvailableModels } from "./lib/modelCatalog.mjs";
+import { formatEvidenceSummary } from "./lib/evidenceSummary.mjs";
 import { LANGUAGE_OPTIONS } from "./lib/language.mjs";
 import {
   acceptPendingDomain,
@@ -426,6 +427,13 @@ export function ProjectView({ project, notice, onAction, onBack }) {
     { title: project.title, subtitle: project.currentLabel },
     notice ? h(Box, { marginBottom: 1 }, h(Text, { color: notice.kind === "error" ? "red" : "green" }, notice.text)) : null,
     h(Box, { marginBottom: 1 }, h(Text, { dimColor: true }, `${project.config.sourceColumnLabel} → ${project.config.targetColumnLabel}`)),
+    project.evidenceSummary ? h(Box, { flexDirection: "column", marginBottom: 1 },
+      h(Text, { dimColor: true }, "查证闸门：本地 → 联网查证 → 模型知识"),
+      h(Text, null, formatEvidenceSummary(project.evidenceSummary)),
+      project.evidenceSummary.modelKnowledge > 0
+        ? h(Text, { color: "yellow" }, `模型知识入口：联网未检出 ${project.evidenceSummary.webNotFound}｜联网失败 ${project.evidenceSummary.webError}`)
+        : null,
+    ) : null,
     h(Box, { gap: 4 },
       h(StageList, { stages: project.stages }),
       h(Box, { flexDirection: "column", flexGrow: 1 },

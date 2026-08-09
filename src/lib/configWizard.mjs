@@ -23,6 +23,26 @@ export const MODEL_PRESETS = {
     protocol: "anthropic",
     baseURL: "https://api.anthropic.com",
   },
+  zhipu: {
+    label: "智谱 GLM",
+    protocol: "openai-compatible",
+    baseURL: "https://open.bigmodel.cn/api/paas/v4",
+  },
+  qwen: {
+    label: "通义千问",
+    protocol: "openai-compatible",
+    baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  },
+  xai: {
+    label: "xAI",
+    protocol: "openai-compatible",
+    baseURL: "https://api.x.ai/v1",
+  },
+  openrouter: {
+    label: "OpenRouter",
+    protocol: "openai-compatible",
+    baseURL: "https://openrouter.ai/api/v1",
+  },
   "claude-cli": {
     label: "Claude Code CLI（订阅额度，无需 API key）",
     protocol: "cli-agent",
