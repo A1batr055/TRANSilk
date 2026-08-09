@@ -3,7 +3,7 @@ import path from "node:path";
 import { segmentId } from "./segment.mjs";
 import { projectSubdir } from "./paths.mjs";
 import { writeAssetWorkbook } from "./assetWorkbook.mjs";
-import { termFields, reusableGlossaryTerms } from "./language.mjs";
+import { machineExchangeGlossaryTerms, termFields, reusableGlossaryTerms } from "./language.mjs";
 
 
 function escXml(s) {
@@ -156,7 +156,7 @@ export async function buildAssets(config, projectDir, precomputed) {
         .map((l) => JSON.parse(l))
     : [];
   const { sourceField, targetField } = termFields(config);
-  const glossary = reusableGlossaryTerms(
+  const workbookGlossary = reusableGlossaryTerms(
     glossaryRaw.map((g) => {
       const pair = pairsById.get(g.source_segment_id);
       return {
@@ -175,8 +175,9 @@ export async function buildAssets(config, projectDir, precomputed) {
     }),
     config
   );
+  const exchangeGlossary = machineExchangeGlossaryTerms(workbookGlossary, config);
   const seenIds = new Set();
-  for (const g of glossary) {
+  for (const g of workbookGlossary) {
     if (seenIds.has(g.id)) throw new Error(`术语ID重复：${g.id}`);
     seenIds.add(g.id);
   }
@@ -185,12 +186,12 @@ export async function buildAssets(config, projectDir, precomputed) {
   fs.writeFileSync(tmxPath, buildTmx(pairs, config), "utf8");
 
   const tbxPath = path.join(exchangeDir, `${config.termStem}.tbx`);
-  fs.writeFileSync(tbxPath, buildTbx(glossary, config), "utf8");
+  fs.writeFileSync(tbxPath, buildTbx(exchangeGlossary, config), "utf8");
 
   const jsonlPath = path.join(exchangeDir, `${config.termStem}.jsonl`);
   fs.writeFileSync(
     jsonlPath,
-    glossary.map((g) => JSON.stringify(g)).join("\n") + (glossary.length ? "\n" : ""),
+    exchangeGlossary.map((g) => JSON.stringify(g)).join("\n") + (exchangeGlossary.length ? "\n" : ""),
     "utf8"
   );
 
@@ -201,7 +202,7 @@ export async function buildAssets(config, projectDir, precomputed) {
     domain: config.domain,
     label: config.languageLabel,
     pairs,
-    glossary,
+    glossary: workbookGlossary,
     sourceColumnLabel: config.sourceColumnLabel,
     targetColumnLabel: config.targetColumnLabel,
     sourceLanguage: config.sourceLanguage,
@@ -212,7 +213,8 @@ export async function buildAssets(config, projectDir, precomputed) {
     projectRoot: projectDir,
     xlsxPath: workbookPath,
     alignmentUnits: pairs.length,
-    glossaryEntries: glossary.length,
+    glossaryEntries: workbookGlossary.length,
+    exchangeGlossaryEntries: exchangeGlossary.length,
     tmx: tmxPath,
     tbx: tbxPath,
     jsonl: jsonlPath,

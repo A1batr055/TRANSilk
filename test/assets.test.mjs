@@ -84,6 +84,17 @@ function assetFixture(t) {
       domain: "信息技术",
       source_segment_id: "AST-0001",
     },
+    {
+      id: "T4",
+      zh_CN: "项目称谓",
+      en_US: "project wording",
+      status: "首选",
+      domain: "信息技术",
+      source_segment_id: "AST-0001",
+      evidence_source: "local",
+      evidence_local_kind: "project_override",
+      evidence_quote: "project wording",
+    },
   ];
   const glossaryPath = path.join(projectDir, config.glossarySource);
   fs.mkdirSync(path.dirname(glossaryPath), { recursive: true });
@@ -95,7 +106,8 @@ function assetFixture(t) {
 test("asset archive publishes only reusable terms with structured provenance", async (t) => {
   const { projectDir, config, precomputed } = assetFixture(t);
   const built = await buildAssets(config, projectDir, precomputed);
-  assert.equal(built.glossaryEntries, 1);
+  assert.equal(built.glossaryEntries, 2);
+  assert.equal(built.exchangeGlossaryEntries, 1);
 
   const exported = fs.readFileSync(built.jsonl, "utf8").trim().split(/\r?\n/).map(JSON.parse);
   assert.equal(exported.length, 1);
@@ -105,16 +117,18 @@ test("asset archive publishes only reusable terms with structured provenance", a
 
   const workbook = await readAssetWorkbook(fs.readFileSync(built.xlsxPath));
   const terms = workbook.sheets["术语库"];
-  assert.equal(terms.rowCount, 4);
-  assert.equal(terms.autoFilter, "A3:P4");
+  assert.equal(terms.rowCount, 5);
+  assert.equal(terms.autoFilter, "A3:P5");
   assert.deepEqual(terms.rows[2].slice(12), ["依据类型", "查证等级", "来源 URL", "查证依据"]);
   assert.equal(terms.rows[3][12], "联网查证");
   assert.equal(terms.rows[3][13], "交叉查证");
   assert.match(terms.rows[3][14], /reference\.example/);
+  assert.equal(terms.rows[4][1], "项目称谓");
+  assert.equal(terms.rows[4][12], "本地术语库");
 
   const tbx = fs.readFileSync(built.tbx, "utf8");
   assert.match(tbx, /访问令牌/);
-  assert.doesNotMatch(tbx, /OAuth 2\.0|废弃候选/);
+  assert.doesNotMatch(tbx, /OAuth 2\.0|废弃候选|项目称谓/);
   await assert.doesNotReject(() => validateAssets(config, projectDir, precomputed));
 });
 

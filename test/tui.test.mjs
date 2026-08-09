@@ -16,6 +16,7 @@ import { bootstrapFromRawDocument } from "../src/lib/bootstrapProject.mjs";
 import { resolveSourceSegments, targetXlsOutputPath } from "../src/lib/sourceAdapter.mjs";
 import { readDocumentParagraphs } from "../src/lib/docReader.mjs";
 import { RUNTIME_TEMP_ROOT } from "../src/lib/paths.mjs";
+import { projectOverridesPath, readProjectOverridesWorkbook } from "../src/lib/projectOverrides.mjs";
 
 const appProps = { initialScreen: "home", initialModel: { configured: true, label: "测试模型" } };
 
@@ -55,6 +56,8 @@ test("new projects copy source material into 01 before processing", async (t) =>
   assert.equal(fs.readFileSync(copiedPath, "utf8"), "A source sentence.\n");
   assert.match(config.targetFile, /^01_原始材料[\\/]/);
   assert.match(config.projectId, /^[0-9a-f-]{36}$/);
+  assert.ok(fs.existsSync(projectOverridesPath(projectDir)));
+  assert.deepEqual(await readProjectOverridesWorkbook(projectDir), []);
   const resolved = await resolveSourceSegments(config, projectDir);
   assert.equal(resolved.segments[0].text, "A source sentence.");
   assert.equal(fs.readFileSync(sourcePath, "utf8"), "A source sentence.\n");
@@ -427,6 +430,26 @@ test("project screen keeps all eight stages visible", () => {
   assert.match(view.lastFrame(), /术语分流：不译 → 本地 → 联网查证 → 模型知识/);
   assert.match(view.lastFrame(), /不译 1｜本地 2｜联网查证 3（交叉查证 0｜单一来源 3）｜模型知识 1/);
   assert.match(view.lastFrame(), /模型知识入口：联网未检出 0｜联网失败 1/);
+  view.unmount();
+});
+
+test("project screen exposes the optional project override workbook before preparation", () => {
+  const stages = ["文本分析", "术语抽取", "术语查证", "人工确认", "翻译", "译后编辑", "术语核查", "交付"]
+    .map((name, index) => ({ number: index + 1, name, complete: false, current: index === 0 }));
+  const view = render(React.createElement(ProjectView, {
+    project: {
+      title: "待准备项目",
+      currentLabel: "等待 Stage 1",
+      stages,
+      archived: false,
+      config: { sourceColumnLabel: "英文原文", targetColumnLabel: "中文译文" },
+    },
+    notice: null,
+    onAction: () => {},
+    onBack: () => {},
+  }));
+  assert.match(view.lastFrame(), /填写项目专用译法（可选）/);
+  assert.match(view.lastFrame(), /运行 Stages 1–3/);
   view.unmount();
 });
 

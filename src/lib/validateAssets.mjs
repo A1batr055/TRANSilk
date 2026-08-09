@@ -4,7 +4,7 @@ import { XMLParser } from "fast-xml-parser";
 import { segmentId } from "./segment.mjs";
 import { projectSubdir } from "./paths.mjs";
 import { readAssetWorkbook } from "./assetWorkbook.mjs";
-import { termFields, reusableGlossaryTerms } from "./language.mjs";
+import { machineExchangeGlossaryTerms, termFields, reusableGlossaryTerms } from "./language.mjs";
 
 
 function readLines(filePath) {
@@ -104,12 +104,13 @@ export async function validateAssets(config, projectDir, precomputed) {
         .filter(Boolean)
         .map((l) => JSON.parse(l))
     : [];
-  const expectedGlossary = reusableGlossaryTerms(glossaryRaw, config).map((term) => ({
+  const expectedWorkbookGlossary = reusableGlossaryTerms(glossaryRaw, config).map((term) => ({
     ...term,
     status: term.status || "首选",
     domain: term.domain || config.domain || "",
   }));
-  const glossaryCount = expectedGlossary.length;
+  const expectedExchangeGlossary = machineExchangeGlossaryTerms(expectedWorkbookGlossary, config);
+  const glossaryCount = expectedWorkbookGlossary.length;
 
   const workbookPath = path.join(mainDir, config.workbookName);
   const { sheetNames, sheets } = await readAssetWorkbook(fs.readFileSync(workbookPath));
@@ -177,7 +178,7 @@ export async function validateAssets(config, projectDir, precomputed) {
 
   const { sourceField, targetField } = termFields(config);
   const termRows = workbookTermRows(terms, sourceField, targetField);
-  termRows.forEach((term, index) => assertTermCore(term, expectedGlossary[index] ?? {}, "工作簿", sourceField, targetField, index));
+  termRows.forEach((term, index) => assertTermCore(term, expectedWorkbookGlossary[index] ?? {}, "工作簿", sourceField, targetField, index));
   const sourceIdPattern = new RegExp(`^${config.segmentPrefix}-\\d{4}$`);
   const seenTermKeys = new Set();
   terms.rows.slice(3).forEach((row, i) => {
@@ -216,18 +217,18 @@ export async function validateAssets(config, projectDir, precomputed) {
   const tbxDoc = parser.parse(fs.readFileSync(tbxPath, "utf8"));
   const tbxTerms = tbxTermRows(tbxDoc, config, sourceField, targetField);
   const conceptCount = tbxTerms.length;
-  if (conceptCount !== termRows.length) {
-    throw new Error(`TBX 术语条目数量（${conceptCount}）与术语库行数（${termRows.length}）不一致`);
+  if (conceptCount !== expectedExchangeGlossary.length) {
+    throw new Error(`TBX 术语条目数量（${conceptCount}）与机器交换术语数量（${expectedExchangeGlossary.length}）不一致`);
   }
-  tbxTerms.forEach((term, index) => assertTermCore(term, expectedGlossary[index] ?? {}, "TBX", sourceField, targetField, index));
+  tbxTerms.forEach((term, index) => assertTermCore(term, expectedExchangeGlossary[index] ?? {}, "TBX", sourceField, targetField, index));
 
   const jsonlPath = path.join(exchangeDir, `${config.termStem}.jsonl`);
   const jsonlTerms = fs.existsSync(jsonlPath) ? readJsonl(jsonlPath) : [];
   const jsonlCount = jsonlTerms.length;
-  if (jsonlCount !== termRows.length) {
-    throw new Error(`JSONL 术语条目数量（${jsonlCount}）与术语库行数（${termRows.length}）不一致`);
+  if (jsonlCount !== expectedExchangeGlossary.length) {
+    throw new Error(`JSONL 术语条目数量（${jsonlCount}）与机器交换术语数量（${expectedExchangeGlossary.length}）不一致`);
   }
-  jsonlTerms.forEach((term, index) => assertTermCore(term, expectedGlossary[index] ?? {}, "JSONL", sourceField, targetField, index));
+  jsonlTerms.forEach((term, index) => assertTermCore(term, expectedExchangeGlossary[index] ?? {}, "JSONL", sourceField, targetField, index));
 
   return {
     workbookPath,

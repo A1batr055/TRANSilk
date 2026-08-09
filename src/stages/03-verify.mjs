@@ -17,9 +17,9 @@ function overrideFor(overrides, sourceTerm, domain) {
   return scoped !== undefined ? scoped : overrides[sourceTerm];
 }
 
-export function checkOverridesAndLocal(candidates, config, projectDir) {
+export function checkOverridesAndLocal(candidates, config, projectDir, suppliedOverrides) {
   const { sourceField, targetField } = termFields(config);
-  const overrides = loadOverrides(projectDir);
+  const overrides = suppliedOverrides ?? loadOverrides(projectDir);
   const termbaseIndex = buildTermbaseIndex();
   const evidence = [];
   const needsWebSearch = [];
@@ -117,9 +117,10 @@ export async function applyModelKnowledgeBatch(candidates, config, batchSize = 2
 export async function verifyCandidates(candidates, config, projectDir, {
   webSearch = searchWebEvidence,
   modelKnowledge = applyModelKnowledgeBatch,
+  projectOverrides,
   onProgress = () => {},
 } = {}) {
-  const { evidence: base, needsWebSearch } = checkOverridesAndLocal(candidates, config, projectDir);
+  const { evidence: base, needsWebSearch } = checkOverridesAndLocal(candidates, config, projectDir, projectOverrides);
   const doNotTranslate = base.filter((item) => item.source === "do_not_translate").length;
   const local = base.filter((item) => item.source === "local").length;
   onProgress({ step: "do_not_translate", total: candidates.length, found: doNotTranslate });

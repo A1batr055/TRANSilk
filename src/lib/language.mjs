@@ -133,6 +133,11 @@ export function reusableGlossaryTerms(entries, config) {
   return dedupeGlossaryTerms(entries.filter(isReusableGlossaryTerm), config);
 }
 
+export function machineExchangeGlossaryTerms(entries, config) {
+  return reusableGlossaryTerms(entries, config)
+    .filter((entry) => entry.evidence_local_kind !== "project_override");
+}
+
 export function languageLabelFor(code) {
   return languageName(normalizeLanguageCode(code));
 }

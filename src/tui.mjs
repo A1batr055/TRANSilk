@@ -22,6 +22,7 @@ import {
 } from "./lib/domainTaxonomy.mjs";
 import { checkForUpdates } from "./lib/selfUpdate.mjs";
 import { listMountedTermbases, unmountExternalTermbase } from "./lib/localTermbase.mjs";
+import { ensureProjectOverridesWorkbook } from "./lib/projectOverrides.mjs";
 
 const h = React.createElement;
 const CLI_PATH = path.join(TOOL_ROOT, "src", "cli.mjs");
@@ -426,7 +427,10 @@ export function ProjectView({ project, notice, onAction, onBack }) {
   const stage8 = project.stages[7].complete;
   const items = [];
 
-  if (!stage3) items.push({ value: "prep", label: "运行 Stages 1–3" });
+  if (!stage3) {
+    items.push({ value: "open-project-overrides", label: "填写项目专用译法（可选）" });
+    items.push({ value: "prep", label: "运行 Stages 1–3" });
+  }
   if (stage3 && !stage5) {
     items.push({ value: "open-workbook", label: "打开术语审阅表" });
     items.push({ value: "translate", label: "审阅完成，运行 Stage 5" });
@@ -862,12 +866,16 @@ export function App({ initialScreen, initialModel } = {}) {
     }
   }, [runCommand]);
 
-  const act = useCallback((action) => {
+  const act = useCallback(async (action) => {
     try {
       if (action === "prep") return runModelCommand("Stages 1–3", ["prep", projectDir]);
       if (action === "translate") return runModelCommand("Stage 5", ["translate", projectDir]);
       if (action === "finish") return runCommand("Stages 7–8", ["finish", projectDir]);
       if (action === "archive") return runCommand("翻译资产生成", ["archive", projectDir]);
+      if (action === "open-project-overrides") {
+        const filePath = await ensureProjectOverridesWorkbook(projectDir);
+        openPath(filePath);
+      }
       if (action === "open-workbook") openPath(project.workbookPath);
       if (action === "open-bilingual") openPath(project.bilingualPath);
       if (action === "open-target") openPath(project.targetPath);

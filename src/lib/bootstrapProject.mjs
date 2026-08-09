@@ -9,6 +9,7 @@ import { assetConfigPath, writeAssetConfig } from "./assetConfig.mjs";
 import { workDirFor } from "./paths.mjs";
 import { resolveLanguageProfile } from "./language.mjs";
 import { assertHasSegments } from "./segment.mjs";
+import { ensureProjectOverridesWorkbook } from "./projectOverrides.mjs";
 
 const MATERIAL_DIR = "01_原始材料";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -70,7 +71,7 @@ function deliveryTargetFile(title, materials, legacyXls = false) {
   return path.join(MATERIAL_DIR, conflicts ? `交付_${name}` : name);
 }
 
-export function bootstrapFromLegacyXls({ xlsPath, projectDir, title, segmentPrefix, date, direction }) {
+export async function bootstrapFromLegacyXls({ xlsPath, projectDir, title, segmentPrefix, date, direction }) {
   const { source } = stageProjectMaterials({ sourcePath: xlsPath, projectDir });
   const rows = readLegacyXlsRows(source.copiedPath);
   const { segments, sections } = extractSegmentsFromRows(rows, segmentPrefix);
@@ -105,6 +106,7 @@ export function bootstrapFromLegacyXls({ xlsPath, projectDir, title, segmentPref
   };
 
   writeAssetConfig(projectDir, config);
+  await ensureProjectOverridesWorkbook(projectDir);
 
   const workDir = workDirFor(projectDir);
   fs.writeFileSync(
@@ -161,6 +163,7 @@ export async function bootstrapFromRawDocument({ sourcePath, targetPath, project
   };
 
   writeAssetConfig(projectDir, config);
+  await ensureProjectOverridesWorkbook(projectDir);
 
   const workDir = workDirFor(projectDir);
   fs.writeFileSync(

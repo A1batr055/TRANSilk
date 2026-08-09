@@ -21,6 +21,7 @@ import fs from "node:fs";
 import { launchTui } from "./tui.mjs";
 import { fileURLToPath } from "node:url";
 import { formatEvidenceSummary, summarizeEvidence } from "./lib/evidenceSummary.mjs";
+import { applyProjectOverrides, projectOverridesPath } from "./lib/projectOverrides.mjs";
 
 const [, , command, ...rest] = process.argv;
 
@@ -153,7 +154,7 @@ async function runBootstrap(projectDir, sourcePath, segmentPrefix, title, date, 
   const resolvedDate = date || new Date().toISOString().slice(0, 10);
   const ext = path.extname(sourcePath).toLowerCase();
 
-  const { segments } =
+  const { segments } = await (
     ext === ".xls" || ext === ".xlsx"
       ? bootstrapFromLegacyXls({
           xlsPath: sourcePath,
@@ -163,7 +164,7 @@ async function runBootstrap(projectDir, sourcePath, segmentPrefix, title, date, 
           date: resolvedDate,
           direction,
         })
-      : await bootstrapFromRawDocument({
+      : bootstrapFromRawDocument({
           sourcePath,
           targetPath,
           projectDir,
@@ -171,8 +172,10 @@ async function runBootstrap(projectDir, sourcePath, segmentPrefix, title, date, 
           segmentPrefix,
           date: resolvedDate,
           direction,
-        });
+        })
+  );
   console.log(`bootstrap完成：${segments.length} 句段，asset-config.json 已写入 ${assetConfigPath(projectDir)}`);
+  console.log(`项目专用译法（可选）：${projectOverridesPath(projectDir)}`);
   console.log("接下来执行 prep 命令继续 Stages 1–3。");
 }
 
@@ -196,7 +199,9 @@ async function runPrep(projectDir) {
     console.log(`Stage 1 完成：domain=${analyzed.domain}，defaultTopic=${analyzed.defaultTopic}`);
   }
 
-  const candidates = await extractCandidates(segments, analyzed);
+  const extractedCandidates = await extractCandidates(segments, analyzed);
+  const projectOverrides = await applyProjectOverrides(extractedCandidates, segments, analyzed, projectDir);
+  const candidates = projectOverrides.candidates;
   fs.writeFileSync(
     path.join(workDir, "candidates.jsonl"),
     candidates.map((c) => JSON.stringify(c)).join("\n") + "\n",
@@ -204,8 +209,15 @@ async function runPrep(projectDir) {
   );
   const doNotTranslateCount = candidates.filter((candidate) => candidate.translation_action === "do_not_translate").length;
   console.log(`Stage 2 完成：候选术语 ${candidates.length} 条｜不译 ${doNotTranslateCount}｜待查证 ${candidates.length - doNotTranslateCount}`);
+  if (projectOverrides.workbookEntries.length) {
+    console.log(`项目专用译法：采用 ${projectOverrides.workbookEntries.length - projectOverrides.missing.length} 条｜补入候选 ${projectOverrides.added} 条｜原文未出现 ${projectOverrides.missing.length} 条`);
+  }
+  for (const entry of projectOverrides.missing) {
+    console.log(`项目专用译法第 ${entry.excelRow} 行未在原文中找到：${entry.sourceTerm}`);
+  }
 
   const evidence = await verifyCandidates(candidates, analyzed, projectDir, {
+    projectOverrides: projectOverrides.overrides,
     onProgress(progress) {
       if (progress.step === "do_not_translate") {
         console.log(`Stage 3/不译：跳过查证 ${progress.found}`);
@@ -345,7 +357,7 @@ async function runArchive(projectDir) {
 
   const built = await runBuildAndValidate(projectDir, precomputed);
   console.log(`积累完成：工作簿 ${built.xlsxPath}`);
-  console.log(`TMX/TBX/JSONL 已生成于 03_翻译记忆与术语交换文件（${built.alignmentUnits} 个句段，${built.glossaryEntries} 条术语）。`);
+  console.log(`TMX/TBX/JSONL 已生成于 03_翻译记忆与术语交换文件（${built.alignmentUnits} 个句段，${built.exchangeGlossaryEntries} 条可交换术语）。`);
   console.log(`${built.termbaseSync.changed ? "已同步" : "无需重复同步"} ${built.termbaseSync.entries} 条术语至 TRANSilk 内部库。`);
 }
 

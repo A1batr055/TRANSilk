@@ -203,5 +203,12 @@ export async function readSimpleWorkbook(buffer) {
   const width = grid.reduce((m, r) => Math.max(m, r?.length ?? 0), 0);
   const filled = grid.map((r) => Array.from({ length: width }, (_, i) => r?.[i] ?? ""));
   const [headers, ...rows] = filled;
-  return { headers: headers ?? [], rows: rows.filter((r) => r.some((v) => v !== "")) };
+  const populated = rows
+    .map((row, index) => ({ row, rowNumber: index + 2 }))
+    .filter((item) => item.row.some((value) => value !== ""));
+  return {
+    headers: headers ?? [],
+    rows: populated.map((item) => item.row),
+    rowNumbers: populated.map((item) => item.rowNumber),
+  };
 }
