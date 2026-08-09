@@ -428,7 +428,7 @@ export function ProjectView({ project, notice, onAction, onBack }) {
     notice ? h(Box, { marginBottom: 1 }, h(Text, { color: notice.kind === "error" ? "red" : "green" }, notice.text)) : null,
     h(Box, { marginBottom: 1 }, h(Text, { dimColor: true }, `${project.config.sourceColumnLabel} → ${project.config.targetColumnLabel}`)),
     project.evidenceSummary ? h(Box, { flexDirection: "column", marginBottom: 1 },
-      h(Text, { dimColor: true }, "查证闸门：本地 → 联网查证 → 模型知识"),
+      h(Text, { dimColor: true }, "术语分流：不译 → 本地 → 联网查证 → 模型知识"),
       h(Text, null, formatEvidenceSummary(project.evidenceSummary)),
       project.evidenceSummary.modelKnowledge > 0
         ? h(Text, { color: "yellow" }, `模型知识入口：联网未检出 ${project.evidenceSummary.webNotFound}｜联网失败 ${project.evidenceSummary.webError}`)

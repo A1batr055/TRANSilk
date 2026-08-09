@@ -25,6 +25,15 @@ export function checkOverridesAndLocal(candidates, config, projectDir) {
   const needsWebSearch = [];
 
   for (const c of candidates) {
+    if (c.translation_action === "do_not_translate") {
+      evidence.push({
+        candidate_id: c.id,
+        source: "do_not_translate",
+        quote: c.translation_action_reason || "原文固定写法",
+        url: "",
+      });
+      continue;
+    }
     const override = overrideFor(overrides, c[sourceField], c.domain || config.domain);
     if (override) {
       evidence.push({
@@ -110,12 +119,16 @@ export async function verifyCandidates(candidates, config, projectDir, {
   onProgress = () => {},
 } = {}) {
   const { evidence: base, needsWebSearch } = checkOverridesAndLocal(candidates, config, projectDir);
+  const doNotTranslate = base.filter((item) => item.source === "do_not_translate").length;
+  const local = base.filter((item) => item.source === "local").length;
+  onProgress({ step: "do_not_translate", total: candidates.length, found: doNotTranslate });
   onProgress({
     step: "local",
     total: candidates.length,
-    found: base.length,
+    found: local,
     remaining: needsWebSearch.length,
   });
+  onProgress({ step: "web_started", total: needsWebSearch.length });
   const searchResults = await webSearch(needsWebSearch, config);
   const webResults = searchResults
     .filter((result) => result.status === "found")

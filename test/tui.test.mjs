@@ -396,7 +396,7 @@ test("project screen keeps all eight stages visible", () => {
     stages,
     archived: false,
     config: { sourceColumnLabel: "英文原文", targetColumnLabel: "中文译文" },
-    evidenceSummary: { local: 2, webSearch: 3, modelKnowledge: 1, webNotFound: 0, webError: 1 },
+    evidenceSummary: { doNotTranslate: 1, local: 2, webSearch: 3, modelKnowledge: 1, webNotFound: 0, webError: 1 },
   };
   const view = render(React.createElement(ProjectView, {
     project,
@@ -408,8 +408,8 @@ test("project screen keeps all eight stages visible", () => {
     assert.match(view.lastFrame(), new RegExp(`Stage ${number}`));
   }
   assert.match(view.lastFrame(), /删除项目/);
-  assert.match(view.lastFrame(), /查证闸门：本地 → 联网查证 → 模型知识/);
-  assert.match(view.lastFrame(), /本地 2｜联网查证 3（交叉查证 0｜单一来源 3）｜模型知识 1/);
+  assert.match(view.lastFrame(), /术语分流：不译 → 本地 → 联网查证 → 模型知识/);
+  assert.match(view.lastFrame(), /不译 1｜本地 2｜联网查证 3（交叉查证 0｜单一来源 3）｜模型知识 1/);
   assert.match(view.lastFrame(), /模型知识入口：联网未检出 0｜联网失败 1/);
   view.unmount();
 });
@@ -440,6 +440,7 @@ test("project inspection reloads the persisted verification summary", (t) => {
 
   const project = inspectProject(projectDir);
   assert.deepEqual(project.evidenceSummary, {
+    doNotTranslate: 0,
     local: 1,
     webSearch: 0,
     webCrossChecked: 0,

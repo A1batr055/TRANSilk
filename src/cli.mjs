@@ -197,12 +197,19 @@ async function runPrep(projectDir) {
     candidates.map((c) => JSON.stringify(c)).join("\n") + "\n",
     "utf8"
   );
-  console.log(`Stage 2 完成：候选术语 ${candidates.length} 条`);
+  const doNotTranslateCount = candidates.filter((candidate) => candidate.translation_action === "do_not_translate").length;
+  console.log(`Stage 2 完成：候选术语 ${candidates.length} 条｜不译 ${doNotTranslateCount}｜待查证 ${candidates.length - doNotTranslateCount}`);
 
   const evidence = await verifyCandidates(candidates, analyzed, projectDir, {
     onProgress(progress) {
+      if (progress.step === "do_not_translate") {
+        console.log(`Stage 3/不译：跳过查证 ${progress.found}`);
+      }
       if (progress.step === "local") {
         console.log(`Stage 3/本地术语库：命中 ${progress.found}｜进入联网查证 ${progress.remaining}`);
+      }
+      if (progress.step === "web_started" && progress.total > 0) {
+        console.log(`Stage 3/联网查证：正在处理 ${progress.total} 条……`);
       }
       if (progress.step === "web") {
         console.log(`Stage 3/联网查证：查到 ${progress.found}｜未检出 ${progress.notFound}｜失败 ${progress.error}`);

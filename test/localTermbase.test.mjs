@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -14,6 +13,7 @@ import {
   importTermbaseFromPath,
 } from "../src/lib/localTermbase.mjs";
 import { checkOverridesAndLocal } from "../src/stages/03-verify.mjs";
+import { RUNTIME_TEMP_ROOT } from "../src/lib/paths.mjs";
 
 function withCleanTermbase(t) {
   const p = termbasePath();
@@ -129,7 +129,8 @@ test("parseTbx reads conceptEntry langSec pairs in both directions", () => {
 
 test("importTermbaseFromPath ingests a .tbx file and skips a .tmx file with a reason", (t) => {
   withCleanTermbase(t);
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "transilk-termbase-import-"));
+  fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
+  const tempDir = fs.mkdtempSync(path.join(RUNTIME_TEMP_ROOT, "transilk-termbase-import-"));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
   const tbxPath = path.join(tempDir, "sample.tbx");
@@ -176,7 +177,8 @@ test("checkOverridesAndLocal reports termbase hits with source \"local\" and ski
     { id: "c1", zh_CN: "术语库", en_US: "termbase" },
     { id: "c2", zh_CN: "未知词", en_US: "unknown" },
   ];
-  const tempProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), "transilk-verify-test-"));
+  fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
+  const tempProjectDir = fs.mkdtempSync(path.join(RUNTIME_TEMP_ROOT, "transilk-verify-test-"));
   t.after(() => fs.rmSync(tempProjectDir, { recursive: true, force: true }));
 
   const { evidence, needsWebSearch } = checkOverridesAndLocal(candidates, config, tempProjectDir);
@@ -195,7 +197,8 @@ test("checkOverridesAndLocal falls back to web/model when the local termbase has
   ]);
   const config = { sourceLanguage: "en-US", targetLanguage: "zh-CN", sourceTermField: "en_US", targetTermField: "zh_CN" };
   const candidates = [{ id: "c1", en_US: "party", zh_CN: "当事人", domain: "法律" }];
-  const tempProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), "transilk-verify-test-"));
+  fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
+  const tempProjectDir = fs.mkdtempSync(path.join(RUNTIME_TEMP_ROOT, "transilk-verify-test-"));
   t.after(() => fs.rmSync(tempProjectDir, { recursive: true, force: true }));
 
   const { evidence, needsWebSearch } = checkOverridesAndLocal(candidates, config, tempProjectDir);
@@ -210,7 +213,8 @@ test("checkOverridesAndLocal prefers a domain-scoped override over a plain sourc
     { id: "c1", en_US: "party", zh_CN: "", domain: "法律" },
     { id: "c2", en_US: "party", zh_CN: "", domain: "政务" },
   ];
-  const tempProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), "transilk-verify-test-"));
+  fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
+  const tempProjectDir = fs.mkdtempSync(path.join(RUNTIME_TEMP_ROOT, "transilk-verify-test-"));
   t.after(() => fs.rmSync(tempProjectDir, { recursive: true, force: true }));
   fs.mkdirSync(path.join(tempProjectDir, "99_项目配置与术语源数据"), { recursive: true });
   fs.writeFileSync(

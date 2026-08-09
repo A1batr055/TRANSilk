@@ -39,21 +39,35 @@ export async function extractCandidates(segments, config, modelCall = callModel)
         `只有当这条术语明显属于另一个更贴切的领域时才改填那个领域)、` +
         `definition(用项目工作语言写的简短释义，不确定可留空)、` +
         `note(需要注意的地方，不确定可留空)、source_segment_id(取自上面方括号里的ID，选第一次出现的那条)。\n` +
+        `另判断translation_action：只有版本号、标准编号、品牌、标识符或跨语言固定写法等在${targetLabel}中必须原样保留的项目，` +
+        `才填do_not_translate；其余填translate。不要因为不确定而标为do_not_translate。` +
+        `translation_action_reason用一句话说明判断。\n` +
         `按此JSON格式回复：{"terms": [{"${sourceField}":"...","${targetField}":"...",` +
-        `"part_of_speech":"...","domain":"...","definition":"...","note":"...","source_segment_id":"..."}]}`,
+        `"part_of_speech":"...","domain":"...","definition":"...","note":"...",` +
+        `"translation_action":"translate|do_not_translate","translation_action_reason":"...","source_segment_id":"..."}]}`,
       json: true,
     });
 
     for (const t of result.terms ?? []) {
       counter += 1;
+      const translationAction = t.translation_action === "do_not_translate" ? "do_not_translate" : "translate";
+      const sourceTerm = t[sourceField];
       candidates.push({
         id: `CAND-${String(counter).padStart(4, "0")}`,
         sourceTermField: sourceField,
         targetTermField: targetField,
-        [sourceField]: t[sourceField],
-        [targetField]: t[targetField],
-        ...(sourceField === "zh_CN" || targetField === "zh_CN" ? { zh_CN: t.zh_CN } : {}),
-        ...(sourceField === "en_US" || targetField === "en_US" ? { en_US: t.en_US } : {}),
+        [sourceField]: sourceTerm,
+        [targetField]: translationAction === "do_not_translate" ? sourceTerm : t[targetField],
+        ...(sourceField === "zh_CN" || targetField === "zh_CN" ? {
+          zh_CN: translationAction === "do_not_translate" ? sourceTerm : t.zh_CN,
+        } : {}),
+        ...(sourceField === "en_US" || targetField === "en_US" ? {
+          en_US: translationAction === "do_not_translate" ? sourceTerm : t.en_US,
+        } : {}),
+        translation_action: translationAction,
+        translation_action_reason: translationAction === "do_not_translate"
+          ? String(t.translation_action_reason ?? "原文固定写法").trim()
+          : "",
         part_of_speech: t.part_of_speech ?? "",
         domain: domainLabels.includes(t.domain) ? t.domain : config.domain,
         definition: t.definition ?? t.definition_zh ?? "",

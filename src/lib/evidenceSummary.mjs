@@ -1,5 +1,6 @@
 export function summarizeEvidence(evidence = []) {
   const summary = {
+    doNotTranslate: 0,
     local: 0,
     webSearch: 0,
     webCrossChecked: 0,
@@ -9,6 +10,7 @@ export function summarizeEvidence(evidence = []) {
     webError: 0,
   };
   for (const item of evidence) {
+    if (item.source === "do_not_translate") summary.doNotTranslate += 1;
     if (item.source === "local") summary.local += 1;
     if (item.source === "web_search") {
       summary.webSearch += 1;
@@ -27,5 +29,5 @@ export function formatEvidenceSummary(summary) {
   const webDetail = summary.webSearch > 0
     ? `（交叉查证 ${summary.webCrossChecked ?? 0}｜单一来源 ${summary.webSingleSource ?? summary.webSearch}）`
     : "";
-  return `本地 ${summary.local}｜联网查证 ${summary.webSearch}${webDetail}｜模型知识 ${summary.modelKnowledge}`;
+  return `不译 ${summary.doNotTranslate ?? 0}｜本地 ${summary.local}｜联网查证 ${summary.webSearch}${webDetail}｜模型知识 ${summary.modelKnowledge}`;
 }

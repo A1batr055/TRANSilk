@@ -1,8 +1,6 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { runtimeTempFile } from "../paths.mjs";
+import { runtimeTempDir, runtimeTempFile } from "../paths.mjs";
+import { runCliProcess } from "../cliProcess.mjs";
 
 const JSON_INSTRUCTION =
   "\n\n只输出合法 JSON，不要任何解释文字，不要用 markdown 代码围栏包裹。";
@@ -13,28 +11,17 @@ function stripCodeFence(text) {
   return fenced ? fenced[1] : trimmed;
 }
 
-function runProcess(command, args, { cwd, input }) {
-  return new Promise((resolve, reject) => {
-    const [spawnCommand, spawnArgs] = process.platform === "win32"
-      ? ["cmd.exe", ["/d", "/s", "/c", command, ...args]]
-      : [command, args];
-    const child = spawn(spawnCommand, spawnArgs, { cwd, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => (stdout += chunk));
-    child.stderr.on("data", (chunk) => (stderr += chunk));
-    child.on("error", (error) => reject(new Error(`无法启动 ${command}：${error.message}`)));
-    child.on("close", (code) => {
-      if (code !== 0) reject(new Error(`${command} 退出码 ${code}：${stderr || stdout}`));
-      else resolve(stdout);
-    });
-    child.stdin.write(input);
-    child.stdin.end();
+function runProcess(command, args, { cwd, input, timeoutMs = 300000 }) {
+  return runCliProcess(command, args, {
+    cwd,
+    input,
+    timeoutMs,
+    errorLabel: `${command} 调用`,
   });
 }
 
 async function callClaudeCli({ model, effort }, { system, user, json }) {
-  const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "transilk-claude-cwd-"));
+  const scratchDir = runtimeTempDir("model-claude");
   try {
     const args = [
       "-p",
@@ -57,7 +44,7 @@ async function callClaudeCli({ model, effort }, { system, user, json }) {
 }
 
 async function callCodexCli({ model, effort }, { system, user, json }) {
-  const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "transilk-codex-cwd-"));
+  const scratchDir = runtimeTempDir("model-codex");
   const outputFile = runtimeTempFile("codex-result", ".txt");
   try {
     const args = ["exec", "--skip-git-repo-check", "--sandbox", "read-only", "-C", scratchDir, "-o", outputFile];

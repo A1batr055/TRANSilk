@@ -49,3 +49,28 @@ test("extractCandidates falls back to the document domain when the model's per-t
   const candidates = await extractCandidates(segments, baseConfig, fakeModelCall);
   assert.equal(candidates[0].domain, "法律");
 });
+
+test("extractCandidates preserves do-not-translate terms and defaults invalid actions to translate", async () => {
+  const fakeModelCall = async () => ({ terms: [
+    {
+      zh_CN: "OAuth 2.0",
+      en_US: "错误译法",
+      domain: "信息技术",
+      translation_action: "do_not_translate",
+      translation_action_reason: "标准名称原样保留",
+      source_segment_id: "S-0001",
+    },
+    {
+      zh_CN: "访问令牌",
+      en_US: "access token",
+      domain: "信息技术",
+      translation_action: "skip_if_unsure",
+      source_segment_id: "S-0001",
+    },
+  ] });
+  const candidates = await extractCandidates(segments, baseConfig, fakeModelCall);
+  assert.equal(candidates[0].translation_action, "do_not_translate");
+  assert.equal(candidates[0].en_US, "OAuth 2.0");
+  assert.equal(candidates[1].translation_action, "translate");
+  assert.equal(candidates[1].en_US, "access token");
+});

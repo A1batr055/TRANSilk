@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -10,9 +9,11 @@ import {
   listDomainLabels,
   loadPendingDomains,
 } from "../src/lib/domainTaxonomy.mjs";
+import { RUNTIME_TEMP_ROOT } from "../src/lib/paths.mjs";
 
 function fixture() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "transilk-domain-test-"));
+  fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(RUNTIME_TEMP_ROOT, "transilk-domain-test-"));
   const seedPath = path.join(dir, "domains.jsonl");
   const localPath = path.join(dir, "domains.local.jsonl");
   const pendingPath = path.join(dir, "pending.jsonl");

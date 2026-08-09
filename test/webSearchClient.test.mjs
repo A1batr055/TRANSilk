@@ -28,6 +28,10 @@ function mockResponse(body, status = 200) {
   return { ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body) };
 }
 
+function pageResponse(text) {
+  return { ok: true, status: 200, headers: { get: () => String(text.length) }, text: async () => text };
+}
+
 function foundClaim(evidence) {
   return { id: "c1", status: "found", evidence, reason: "" };
 }
@@ -245,6 +249,8 @@ test("Codex CLI requires a completed web event", async () => {
   const [result] = await searchWebEvidence(candidates, config, {
     secrets: { provider: "codex-cli", "codex-cli": { protocol: "cli-agent", cli: "codex" } },
     runImpl,
+    lookupImpl: async () => [{ address: "203.0.113.10", family: 4 }],
+    fetchImpl: async () => pageResponse("A terminology database."),
   });
   assert.equal(result.status, "found");
 });
@@ -268,6 +274,57 @@ test("Codex CLI verifies a selected URL by reading the public page when events o
   });
   assert.equal(result.status, "found");
   assert.equal(result.sources[0].url, "https://docs.example/term");
+  assert.equal(result.sources[0].excerpt, "Verified terminology definition");
+});
+
+test("Codex CLI verifies multiple terms in one CLI invocation", async () => {
+  const batchCandidates = [
+    candidates[0],
+    { id: "c2", zh_CN: "访问令牌", en_US: "access token", domain: "信息技术" },
+  ];
+  let calls = 0;
+  const runImpl = async (_command, _args, input) => {
+    calls += 1;
+    assert.match(input, /联网防幻觉测试词/);
+    assert.match(input, /访问令牌/);
+    return [
+      JSON.stringify({ type: "item.completed", item: { id: "w1", type: "web_search", status: "completed", action: { type: "search", query: "terms" } } }),
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify({ results: [
+        foundClaim([{ quote: "First definition", url: "https://docs.example/first" }]),
+        { id: "c2", status: "found", evidence: [{ quote: "Second definition", url: "https://docs.example/second" }], reason: "" },
+      ] }) } }),
+    ].join("\n");
+  };
+  const results = await searchWebEvidence(batchCandidates, config, {
+    secrets: { provider: "codex-cli", "codex-cli": { protocol: "cli-agent", cli: "codex" } },
+    runImpl,
+    lookupImpl: async () => [{ address: "203.0.113.10", family: 4 }],
+    fetchImpl: async (url) => pageResponse(url.endsWith("/first") ? "First definition" : "Second definition"),
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(results.map((item) => item.status), ["found", "found"]);
+  assert.deepEqual(results.map((item) => item.sources[0].excerpt), ["First definition", "Second definition"]);
+});
+
+test("Codex CLI rejects a batch not-found claim without a matching completed query", async () => {
+  const batchCandidates = [
+    candidates[0],
+    { id: "c2", zh_CN: "访问令牌", en_US: "access token", domain: "信息技术" },
+  ];
+  const runImpl = async () => [
+    JSON.stringify({ type: "item.completed", item: { id: "w1", type: "web_search", status: "completed", action: { type: "search", query: "联网防幻觉测试词" } } }),
+    JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify({ results: [
+      { id: "c1", status: "not_found", evidence: [], reason: "未检出" },
+      { id: "c2", status: "not_found", evidence: [], reason: "未检出" },
+    ] }) } }),
+  ].join("\n");
+  const results = await searchWebEvidence(batchCandidates, config, {
+    secrets: { provider: "codex-cli", "codex-cli": { protocol: "cli-agent", cli: "codex" } },
+    runImpl,
+  });
+  assert.equal(results[0].status, "not_found");
+  assert.equal(results[1].status, "error");
+  assert.match(results[1].error, /没有检测到该术语对应的已完成搜索查询/);
 });
 
 test("Codex CLI refuses to fetch a model-selected private URL", async () => {
@@ -295,6 +352,8 @@ test("Claude CLI correlates tool_result with tool_use", async () => {
   const [result] = await searchWebEvidence(candidates, config, {
     secrets: { provider: "claude-cli", "claude-cli": { protocol: "cli-agent", cli: "claude" } },
     runImpl,
+    lookupImpl: async () => [{ address: "203.0.113.10", family: 4 }],
+    fetchImpl: async () => pageResponse("A terminology database."),
   });
   assert.equal(result.status, "found");
 });
@@ -347,8 +406,29 @@ test("Stage 3 reports each gate in order", async (t) => {
     modelKnowledge: async () => [{ candidate_id: "c1", source: "model_knowledge", quote: "[低]不确定", url: "" }],
     onProgress: (item) => progress.push(item),
   });
-  assert.deepEqual(progress.map((item) => item.step), ["local", "web", "model_knowledge"]);
-  assert.equal(progress[1].notFound, 1);
+  assert.deepEqual(progress.map((item) => item.step), ["do_not_translate", "local", "web_started", "web", "model_knowledge"]);
+  assert.equal(progress[3].notFound, 1);
+});
+
+test("Stage 3 skips all verification gates for do-not-translate candidates", async (t) => {
+  fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
+  const projectDir = fs.mkdtempSync(path.join(RUNTIME_TEMP_ROOT, "stage3-dnt-"));
+  t.after(() => fs.rmSync(projectDir, { recursive: true, force: true }));
+  let webCalled = false;
+  let knowledgeCalled = false;
+  const evidence = await verifyCandidates([{
+    ...candidates[0],
+    zh_CN: "OAuth 2.0",
+    en_US: "OAuth 2.0",
+    translation_action: "do_not_translate",
+    translation_action_reason: "标准名称原样保留",
+  }], config, projectDir, {
+    webSearch: async (items) => { webCalled = items.length > 0; return []; },
+    modelKnowledge: async () => { knowledgeCalled = true; return []; },
+  });
+  assert.equal(webCalled, false);
+  assert.equal(knowledgeCalled, false);
+  assert.deepEqual(evidence, [{ candidate_id: "c1", source: "do_not_translate", quote: "标准名称原样保留", url: "" }]);
 });
 
 test("evidence summary preserves the three verification gates", () => {
@@ -358,8 +438,8 @@ test("evidence summary preserves the three verification gates", () => {
     { source: "model_knowledge", quote: "[联网未检出：来源冲突][中]模型知识" },
     { source: "model_knowledge", quote: "[联网失败：超时][低]模型知识" },
   ]);
-  assert.deepEqual(summary, { local: 1, webSearch: 1, webCrossChecked: 1, webSingleSource: 0, modelKnowledge: 2, webNotFound: 1, webError: 1 });
-  assert.equal(formatEvidenceSummary(summary), "本地 1｜联网查证 1（交叉查证 1｜单一来源 0）｜模型知识 2");
+  assert.deepEqual(summary, { doNotTranslate: 0, local: 1, webSearch: 1, webCrossChecked: 1, webSingleSource: 0, modelKnowledge: 2, webNotFound: 1, webError: 1 });
+  assert.equal(formatEvidenceSummary(summary), "不译 0｜本地 1｜联网查证 1（交叉查证 1｜单一来源 0）｜模型知识 2");
 });
 
 test("review workbook exposes all selected source URLs", async (t) => {

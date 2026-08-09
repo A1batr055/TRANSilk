@@ -38,7 +38,7 @@ function sourceRecords(value, output = []) {
     output.push({
       url,
       title: String(value.title ?? value.name ?? "").trim(),
-      excerpt: String(value.content ?? value.snippet ?? value.cited_text ?? value.text ?? "").trim(),
+      excerpt: String(value.excerpt ?? value.content ?? value.snippet ?? value.cited_text ?? value.text ?? "").trim(),
     });
   }
   Object.values(value).forEach((item) => sourceRecords(item, output));
@@ -135,6 +135,8 @@ export function chatTrace(body, mode) {
 export function cliTrace(toolUses, toolResults) {
   const useIds = new Set(toolUses.map((item) => item.id).filter(Boolean));
   const matchedResults = toolResults.filter((item) => !item.tool_use_id || useIds.has(item.tool_use_id));
+  const completedIds = new Set(matchedResults.map((item) => item.tool_use_id).filter(Boolean));
+  const completedUses = toolUses.filter((item) => !item.id || completedIds.has(item.id));
   const failed = matchedResults.some((item) => item.is_error === true || /error|failed/i.test(item.status ?? ""));
   return {
     requested: toolUses.length > 0,
@@ -142,6 +144,10 @@ export function cliTrace(toolUses, toolResults) {
     failed,
     error: failed ? "联网搜索工具返回错误" : "",
     sources: uniqueSources(matchedResults),
+    queries: [...new Set([...completedUses, ...matchedResults]
+      .map((item) => item?.query ?? item?.input?.query ?? item?.action?.query)
+      .filter((item) => typeof item === "string" && item.trim())
+      .map((item) => item.trim()))],
   };
 }
 

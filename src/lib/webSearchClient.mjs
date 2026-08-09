@@ -1,14 +1,15 @@
-import { spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import fs from "node:fs";
 import net from "node:net";
 import { readModelConfig } from "./configWizard.mjs";
 import { termFields } from "./language.mjs";
 import { runtimeTempDir } from "./paths.mjs";
+import { runCliProcess } from "./cliProcess.mjs";
 import {
   anthropicTrace,
   chatTrace,
   cliTrace,
+  normalizeUrl,
   responseTrace,
   uniqueSources,
   validateGroundedResult,
@@ -129,17 +130,11 @@ function comparablePageText(value) {
   return pageText(value).replace(/\s+/g, "").toLocaleLowerCase();
 }
 
-async function validateCliSingle(candidate, claimText, trace, fetchImpl, lookupImpl) {
-  const claim = parseClaims(claimText).find((item) => item?.id === candidate.id);
-  if (!trace.requested || !trace.completed || trace.failed || claim?.status !== "found") {
-    return validateGroundedResult(candidate.id, claim, trace);
-  }
-  const knownUrls = new Set(trace.sources.map((item) => item.url));
-  const fetchedSources = [];
-  for (const evidence of claim.evidence ?? []) {
-    if (knownUrls.has(evidence?.url)) continue;
-    try {
-      const url = await assertPublicPageUrl(evidence?.url, lookupImpl);
+async function fetchCliSource(evidence, fetchImpl, lookupImpl, pageCache) {
+  const url = await assertPublicPageUrl(evidence?.url, lookupImpl);
+  let pagePromise = pageCache.get(url);
+  if (!pagePromise) {
+    pagePromise = (async () => {
       const response = await fetchImpl(url, {
         headers: { "User-Agent": "TRANSilk/0.1 terminology-verification" },
         redirect: "error",
@@ -150,17 +145,53 @@ async function validateCliSingle(candidate, claimText, trace, fetchImpl, lookupI
       if (contentLength > 5 * 1024 * 1024) throw new Error("页面过大");
       const text = await response.text();
       if (text.length > 5 * 1024 * 1024) throw new Error("页面过大");
-      const quote = String(evidence?.quote ?? "").trim();
-      if (!quote || !comparablePageText(text).includes(comparablePageText(quote))) throw new Error("页面中未找到依据摘录");
-      fetchedSources.push({ url, title: "", excerpt: quote });
+      return comparablePageText(text);
+    })();
+    pageCache.set(url, pagePromise);
+  }
+  const quote = String(evidence?.quote ?? "").trim();
+  if (!quote || !(await pagePromise).includes(comparablePageText(quote))) throw new Error("页面中未找到依据摘录");
+  return { url, title: "", excerpt: quote };
+}
+
+function queryCoversCandidate(candidate, config, queries) {
+  const { sourceField, targetField } = termFields(config);
+  const terms = [candidate[sourceField], candidate[targetField]]
+    .map((value) => String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase())
+    .filter(Boolean);
+  return queries.some((query) => {
+    const normalized = String(query).normalize("NFKC").toLocaleLowerCase();
+    return terms.some((term) => normalized.includes(term));
+  });
+}
+
+async function validateCliBatch(candidates, config, claimText, trace, fetchImpl, lookupImpl) {
+  const claims = new Map(parseClaims(claimText).map((claim) => [claim?.id, claim]));
+  const trustedByUrl = new Map(trace.sources.map((source) => [normalizeUrl(source.url), source]));
+  const pageCache = new Map();
+  return Promise.all(candidates.map(async (candidate) => {
+    const claim = claims.get(candidate.id);
+    if (claim?.status === "not_found" && !queryCoversCandidate(candidate, config, trace.queries ?? [])) {
+      return { candidate_id: candidate.id, status: "error", error: "没有检测到该术语对应的已完成搜索查询" };
+    }
+    if (!trace.requested || !trace.completed || trace.failed || claim?.status !== "found") {
+      return validateGroundedResult(candidate.id, claim, trace);
+    }
+    try {
+      const evidence = Array.isArray(claim.evidence) ? claim.evidence : [];
+      if (evidence.length > 5) throw new Error("单条术语的来源超过5项");
+      const fetchedSources = await Promise.all(evidence.map((item) => {
+        const trusted = trustedByUrl.get(normalizeUrl(item?.url));
+        return trusted?.excerpt ? trusted : fetchCliSource(item, fetchImpl, lookupImpl, pageCache);
+      }));
+      return validateGroundedResult(candidate.id, claim, {
+        ...trace,
+        sources: uniqueSources([trace.sources, fetchedSources]),
+      });
     } catch (error) {
       return { candidate_id: candidate.id, status: "error", error: `CLI来源页面无法核验：${error.message}` };
     }
-  }
-  return validateGroundedResult(candidate.id, claim, {
-    ...trace,
-    sources: uniqueSources([trace.sources, fetchedSources]),
-  });
+  }));
 }
 
 async function searchOneWithResponses(candidate, config, provider, fetchImpl) {
@@ -252,19 +283,12 @@ async function mapCandidates(candidates, searchOne) {
   return results;
 }
 
-function run(command, args, input, cwd) {
-  return new Promise((resolve, reject) => {
-    const [spawnCommand, spawnArgs] = process.platform === "win32"
-      ? ["cmd.exe", ["/d", "/s", "/c", command, ...args]]
-      : [command, args];
-    const child = spawn(spawnCommand, spawnArgs, { cwd, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => (stdout += chunk));
-    child.stderr.on("data", (chunk) => (stderr += chunk));
-    child.on("error", (error) => reject(new Error(`无法启动${command}：${error.message}`)));
-    child.on("close", (code) => code === 0 ? resolve(stdout) : reject(new Error(`${command}联网查证失败（退出码${code}）：${stderr || stdout}`)));
-    child.stdin.end(input);
+function run(command, args, input, cwd, timeoutMs = 300000) {
+  return runCliProcess(command, args, {
+    cwd,
+    input,
+    timeoutMs,
+    errorLabel: `${command}联网查证`,
   });
 }
 
@@ -272,38 +296,38 @@ function jsonLines(text) {
   return String(text).split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
 }
 
-async function searchOneWithCodex(candidate, config, provider, runImpl, fetchImpl, lookupImpl) {
+async function searchBatchWithCodex(candidates, config, provider, runImpl, fetchImpl, lookupImpl) {
   const scratch = runtimeTempDir("web-codex");
   try {
     const args = ["--search", "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral", "--json", "-C", scratch];
     if (provider.model) args.push("-m", provider.model);
     if (provider.effort) args.push("-c", `model_reasoning_effort=${provider.effort}`);
     args.push("-");
-    const events = jsonLines(await runImpl("codex", args, `${SEARCH_SYSTEM}\n\n${promptFor([candidate], config)}`, scratch));
+    const events = jsonLines(await runImpl("codex", args, `${SEARCH_SYSTEM}\n\n${promptFor(candidates, config)}`, scratch, 300000));
     const searchEvents = events.filter((event) => /web_search/i.test(event?.item?.type ?? ""));
     const uses = searchEvents.map((event) => ({ ...event.item, id: event.item?.id ?? event.id }));
     const results = searchEvents
       .filter((event) => event?.type === "item.completed" || event?.item?.status === "completed")
       .map((event) => ({ ...event.item, tool_use_id: event.item?.id ?? event.id }));
     const finalText = [...events].reverse().find((event) => event?.item?.type === "agent_message")?.item?.text;
-    return validateCliSingle(candidate, finalText, cliTrace(uses, results), fetchImpl, lookupImpl);
+    return validateCliBatch(candidates, config, finalText, cliTrace(uses, results), fetchImpl, lookupImpl);
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 }
 
-async function searchOneWithClaude(candidate, config, provider, runImpl, fetchImpl, lookupImpl) {
+async function searchBatchWithClaude(candidates, config, provider, runImpl, fetchImpl, lookupImpl) {
   const scratch = runtimeTempDir("web-claude");
   try {
     const args = ["-p", "--output-format", "stream-json", "--verbose", "--allowedTools", "WebSearch,WebFetch", "--system-prompt", SEARCH_SYSTEM];
     if (provider.model) args.push("--model", provider.model);
     if (provider.effort) args.push("--effort", provider.effort);
-    const events = jsonLines(await runImpl("claude", args, promptFor([candidate], config), scratch));
+    const events = jsonLines(await runImpl("claude", args, promptFor(candidates, config), scratch, 300000));
     const content = events.flatMap((event) => event?.message?.content ?? []);
     const uses = content.filter((item) => item?.type === "tool_use" && /WebSearch|WebFetch/i.test(item.name));
     const results = content.filter((item) => item?.type === "tool_result");
     const finalText = [...events].reverse().find((event) => event?.type === "result")?.result;
-    return validateCliSingle(candidate, finalText, cliTrace(uses, results), fetchImpl, lookupImpl);
+    return validateCliBatch(candidates, config, finalText, cliTrace(uses, results), fetchImpl, lookupImpl);
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
@@ -335,10 +359,18 @@ export async function searchWebEvidence(candidates, config, {
   const provider = secrets?.[providerKey];
   if (!provider) return errorsFor(candidates, new Error("没有可用的模型服务商配置"));
   if (provider.protocol === "cli-agent" && provider.cli === "codex") {
-    return mapCandidates(candidates, (candidate) => searchOneWithCodex(candidate, config, provider, runImpl, fetchImpl, lookupImpl));
+    try {
+      return await searchBatchWithCodex(candidates, config, provider, runImpl, fetchImpl, lookupImpl);
+    } catch (error) {
+      return errorsFor(candidates, error);
+    }
   }
   if (provider.protocol === "cli-agent" && provider.cli === "claude") {
-    return mapCandidates(candidates, (candidate) => searchOneWithClaude(candidate, config, provider, runImpl, fetchImpl, lookupImpl));
+    try {
+      return await searchBatchWithClaude(candidates, config, provider, runImpl, fetchImpl, lookupImpl);
+    } catch (error) {
+      return errorsFor(candidates, error);
+    }
   }
   if (provider.protocol === "anthropic") {
     return mapCandidates(candidates, (candidate) => searchOneWithAnthropic(candidate, config, provider, fetchImpl));

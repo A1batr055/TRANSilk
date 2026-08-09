@@ -37,13 +37,14 @@ function groupEvidence(evidence) {
 
 function bestEvidence(evidenceByCandidate, candidateId) {
   const list = evidenceByCandidate.get(candidateId) ?? [];
-  const order = ["local", "web_search", "model_knowledge"];
+  const order = ["do_not_translate", "local", "web_search", "model_knowledge"];
   return list.slice().sort((a, b) => order.indexOf(a.source) - order.indexOf(b.source))[0];
 }
 
 function formatEvidence(ev) {
   if (!ev) return "（无出处）";
   const quote = (ev.quote ?? "").slice(0, 120);
+  if (ev.source === "do_not_translate") return `[不译] ${quote}`;
   const level = ev.source === "web_search"
     ? ev.verification_level === "cross_checked" ? "·交叉查证" : "·单一来源"
     : "";
@@ -145,6 +146,8 @@ export async function importReviewedGlossary(workbookPath, candidates, evidence 
       note: original.note ?? original.note_zh ?? "",
       definition_zh: original.definition_zh ?? original.definition ?? "",
       note_zh: original.note_zh ?? original.note ?? "",
+      translation_action: original.translation_action ?? "translate",
+      translation_action_reason: original.translation_action_reason ?? "",
       source_segment_id: original.source_segment_id ?? "",
       evidence_source: best?.source ?? "",
       evidence_quote: best?.quote ?? "",
