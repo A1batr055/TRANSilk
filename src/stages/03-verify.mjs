@@ -39,14 +39,15 @@ export function checkOverridesAndLocal(candidates, config, projectDir) {
       evidence.push({
         candidate_id: c.id,
         source: "local",
+        local_kind: "project_override",
         quote: typeof override === "string" ? override : override[targetField],
         url: "",
       });
       continue;
     }
-    const localMatches = lookupTerm(termbaseIndex, config.sourceLanguage, c[sourceField], c.domain || config.domain);
+    const localMatches = lookupTerm(termbaseIndex, config.sourceLanguage, config.targetLanguage, c[sourceField], c.domain || config.domain);
     if (localMatches.length === 1) {
-      evidence.push({ candidate_id: c.id, source: "local", quote: localMatches[0].targetTerm, url: "" });
+      evidence.push({ candidate_id: c.id, source: "local", local_kind: "termbase", quote: localMatches[0].targetTerm, url: "" });
       continue;
     }
     needsWebSearch.push(c);

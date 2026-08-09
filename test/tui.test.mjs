@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import React from "react";
 import { render } from "ink-testing-library";
-import { App, ConfigWizard, DomainPendingEditScreen, DomainTaxonomyScreen, ModelSwitch, ProjectList, ProjectView } from "../src/tui.mjs";
+import { App, ConfigWizard, DomainPendingEditScreen, DomainTaxonomyScreen, ExternalTermbasesScreen, ModelSwitch, ProjectList, ProjectView } from "../src/tui.mjs";
 import { listAvailableModels } from "../src/lib/modelCatalog.mjs";
 import { inspectProject, normalizeInputPath, projectSlug } from "../src/lib/tuiState.mjs";
 import { detectDirection, resolveLanguageProfile, termFields } from "../src/lib/language.mjs";
@@ -30,7 +30,7 @@ test("normalizeInputPath accepts a dragged quoted path", () => {
 });
 
 test("new projects copy source material into 01 before processing", async (t) => {
-  const tempRoot = "D:\\CodexWorkspace\\Temp";
+  const tempRoot = RUNTIME_TEMP_ROOT;
   fs.mkdirSync(tempRoot, { recursive: true });
   const projectDir = fs.mkdtempSync(path.join(tempRoot, "transilk-material-test-"));
   const sourcePath = path.join(projectDir, "..", `${path.basename(projectDir)}-source.txt`);
@@ -54,13 +54,14 @@ test("new projects copy source material into 01 before processing", async (t) =>
   assert.match(config.sourceFile, /^01_原始材料[\\/]/);
   assert.equal(fs.readFileSync(copiedPath, "utf8"), "A source sentence.\n");
   assert.match(config.targetFile, /^01_原始材料[\\/]/);
+  assert.match(config.projectId, /^[0-9a-f-]{36}$/);
   const resolved = await resolveSourceSegments(config, projectDir);
   assert.equal(resolved.segments[0].text, "A source sentence.");
   assert.equal(fs.readFileSync(sourcePath, "utf8"), "A source sentence.\n");
 });
 
 test("delivery path never overwrites a copied input with the same name", async (t) => {
-  const tempRoot = "D:\\CodexWorkspace\\Temp";
+  const tempRoot = RUNTIME_TEMP_ROOT;
   fs.mkdirSync(tempRoot, { recursive: true });
   const projectDir = fs.mkdtempSync(path.join(tempRoot, "transilk-collision-test-"));
   const inputDir = fs.mkdtempSync(path.join(tempRoot, "transilk-collision-input-"));
@@ -85,7 +86,7 @@ test("delivery path never overwrites a copied input with the same name", async (
 });
 
 test("Markdown is accepted as a plain-text source document", async (t) => {
-  const tempRoot = "D:\\CodexWorkspace\\Temp";
+  const tempRoot = RUNTIME_TEMP_ROOT;
   fs.mkdirSync(tempRoot, { recursive: true });
   const inputDir = fs.mkdtempSync(path.join(tempRoot, "transilk-md-test-"));
   const sourcePath = path.join(inputDir, "source.md");
@@ -98,7 +99,7 @@ test("XLSX projects preserve the XLSX delivery extension", () => {
   const output = targetXlsOutputPath({
     sourceFile: "01_原始材料/source.xlsx",
     targetFile: "01_原始材料/target.txt",
-  }, "D:\\project");
+  }, path.join(RUNTIME_TEMP_ROOT, "project"));
   assert.equal(path.extname(output), ".xlsx");
 });
 
@@ -109,9 +110,24 @@ test("TUI opens the create-project wizard from the home screen", async () => {
   assert.match(view.lastFrame(), /新建翻译项目/);
   assert.match(view.lastFrame(), /项目列表/);
   assert.match(view.lastFrame(), /模型设置/);
+  assert.match(view.lastFrame(), /外部术语库/);
   view.stdin.write("\r");
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.match(view.lastFrame(), /原始材料路径/);
+  view.unmount();
+});
+
+test("external termbase screen distinguishes mounting from deleting the source file", () => {
+  const view = render(React.createElement(ExternalTermbasesScreen, {
+    mounts: [{ id: "m1", name: "official.tbx", entryCount: 12, available: true }],
+    notice: null,
+    onMount() {},
+    onUnmount() {},
+    onBack() {},
+  }));
+  assert.match(view.lastFrame(), /挂载 TBX 文件或目录/);
+  assert.match(view.lastFrame(), /移除挂载 · official\.tbx/);
+  assert.match(view.lastFrame(), /不会删除原文件/);
   view.unmount();
 });
 

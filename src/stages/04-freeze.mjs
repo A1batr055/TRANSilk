@@ -164,6 +164,7 @@ export async function importReviewedGlossary(workbookPath, candidates, evidence 
       translation_action_reason: original.translation_action_reason ?? "",
       source_segment_id: original.source_segment_id ?? "",
       evidence_source: best?.source ?? "",
+      evidence_local_kind: best?.local_kind ?? "",
       evidence_quote: best?.quote ?? "",
       evidence_url: evidenceUrls(best),
       evidence_sources: structuredEvidenceSources(best),

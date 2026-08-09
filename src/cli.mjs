@@ -11,7 +11,7 @@ import { extractCandidates } from "./stages/02-extract.mjs";
 import { verifyCandidates } from "./stages/03-verify.mjs";
 import { exportCandidatesToWorkbook, importReviewedGlossary } from "./stages/04-freeze.mjs";
 import { translateWithGlossary } from "./stages/05-translate.mjs";
-import { importTermbaseFromPath, mergeIntoTermbase, glossaryToTermbaseEntries } from "./lib/localTermbase.mjs";
+import { importTermbaseFromPath, listMountedTermbases, unmountExternalTermbase } from "./lib/localTermbase.mjs";
 import { loadPendingDomains, addDomain, recordPendingDomain, listDomainLabels, PENDING_DOMAIN_LABEL } from "./lib/domainTaxonomy.mjs";
 import { checkForUpdates } from "./lib/selfUpdate.mjs";
 import { runBuildAndValidate } from "./stages/08-build.mjs";
@@ -33,7 +33,9 @@ const USAGE =
   "  transilk translate <项目目录>   # Stages 4–5 → 双语对照 txt，停\n" +
   "  transilk finish    <项目目录>   # Stages 7–8 → 核查 + 落库交付译文\n" +
   "  transilk archive   <项目目录>   # 可选：生成双语对齐工作簿 + TMX/TBX/JSONL（积累个人资产）\n" +
-  "  transilk import-termbase <TBX文件或目录>   # 导入本地术语库，供 Stage 3 机械命中\n" +
+  "  transilk mount-termbase <TBX文件或目录>   # 手动挂载外部术语库，供 Stage 3 本地命中\n" +
+  "  transilk list-termbases   # 查看已挂载的外部术语库\n" +
+  "  transilk unmount-termbase <挂载ID或路径>   # 移除外部术语库挂载\n" +
   "  transilk list-pending-domains   # 查看 Stage 1 归不进封闭词表、待人工确认的领域建议\n" +
   "  transilk add-domain <领域名>   # 把领域名加入封闭词表\n" +
   "  transilk reclassify-domain <项目目录> <新领域名>   # 把已有项目的 domain 改成封闭词表内的值\n" +
@@ -45,7 +47,10 @@ const COMMANDS = {
   translate: runTranslate,
   finish: runFinish,
   archive: runArchive,
-  "import-termbase": runImportTermbase,
+  "mount-termbase": runMountTermbase,
+  "import-termbase": runMountTermbase,
+  "list-termbases": runListTermbases,
+  "unmount-termbase": runUnmountTermbase,
   "list-pending-domains": runListPendingDomains,
   "add-domain": runAddDomain,
   "reclassify-domain": runReclassifyDomain,
@@ -260,12 +265,6 @@ async function runTranslate(projectDir) {
   fs.writeFileSync(glossaryPath, glossary.map((g) => JSON.stringify(g)).join("\n") + "\n", "utf8");
   console.log(`Stage 4 完成：术语表已冻结，${glossary.length} 条，写入 ${glossaryPath}`);
 
-  const termbaseEntries = glossaryToTermbaseEntries(glossary, config);
-  if (termbaseEntries.length) {
-    const termbaseSize = mergeIntoTermbase(termbaseEntries);
-    console.log(`已合并 ${termbaseEntries.length} 条术语进本地术语库（累计 ${termbaseSize} 条）。`);
-  }
-
   const { segments } = JSON.parse(fs.readFileSync(path.join(workDir, "segments.json"), "utf8"));
   const translated = await translateWithGlossary(segments, glossary, config);
   const bilingualPath = path.join(workDir, "bilingual.txt");
@@ -320,7 +319,8 @@ async function runFinish(projectDir) {
     console.log("如需积累双语对齐工作簿 + TM/术语资产包，执行 archive 命令（可选）。");
     return;
   }
-  await runBuildAndValidate(projectDir);
+  const built = await runBuildAndValidate(projectDir);
+  console.log(`已自动同步 ${built.termbaseSync.entries} 条术语至 TRANSilk 内部库。`);
 }
 
 async function runArchive(projectDir) {
@@ -346,17 +346,37 @@ async function runArchive(projectDir) {
   const built = await runBuildAndValidate(projectDir, precomputed);
   console.log(`积累完成：工作簿 ${built.xlsxPath}`);
   console.log(`TMX/TBX/JSONL 已生成于 03_翻译记忆与术语交换文件（${built.alignmentUnits} 个句段，${built.glossaryEntries} 条术语）。`);
+  console.log(`${built.termbaseSync.changed ? "已同步" : "无需重复同步"} ${built.termbaseSync.entries} 条术语至 TRANSilk 内部库。`);
 }
 
-async function runImportTermbase(inputPath) {
+async function runMountTermbase(inputPath) {
+  if (!inputPath) throw new Error("请提供 TBX 文件或目录路径。");
   const result = importTermbaseFromPath(inputPath);
   for (const item of result.imported) {
-    console.log(`已解析 ${item.file}：${item.count} 条`);
+    console.log(`${item.updated ? "已刷新" : "已挂载"} ${item.file}：${item.count} 条术语`);
   }
   for (const item of result.skipped) {
     console.log(`跳过 ${item.file}：${item.reason}`);
   }
-  console.log(`本地术语库导入完成：新增/更新 ${result.addedOrUpdated} 条，累计 ${result.termbaseSize} 条。`);
+  console.log(`外部术语库挂载完成：当前共 ${result.totalMounts} 个挂载。`);
+}
+
+async function runListTermbases() {
+  const mounts = listMountedTermbases();
+  if (!mounts.length) {
+    console.log("当前没有已挂载的外部术语库。");
+    return;
+  }
+  for (const mount of mounts) {
+    console.log(`${mount.id}｜${mount.available ? "可用" : "文件缺失"}｜${mount.name}｜${mount.path}`);
+  }
+}
+
+async function runUnmountTermbase(identifier) {
+  if (!identifier) throw new Error("请提供外部术语库的挂载 ID 或路径。");
+  const result = unmountExternalTermbase(identifier);
+  if (!result.removed) throw new Error(`未找到外部术语库挂载：${identifier}`);
+  console.log(`已移除外部术语库挂载：${result.removed.name}`);
 }
 
 async function runListPendingDomains() {

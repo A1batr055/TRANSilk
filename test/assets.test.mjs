@@ -6,6 +6,21 @@ import { buildAssets } from "../src/lib/buildAssets.mjs";
 import { fontForLanguage, readAssetWorkbook } from "../src/lib/assetWorkbook.mjs";
 import { validateAssets } from "../src/lib/validateAssets.mjs";
 import { RUNTIME_TEMP_ROOT } from "../src/lib/paths.mjs";
+import { writeAssetConfig, readAssetConfig } from "../src/lib/assetConfig.mjs";
+import { runBuildAndValidate } from "../src/stages/08-build.mjs";
+import { internalProjectsDir, loadInternalProjectTerms } from "../src/lib/localTermbase.mjs";
+
+function withIsolatedTermbase(t) {
+  fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
+  const stateDir = fs.mkdtempSync(path.join(RUNTIME_TEMP_ROOT, "transilk-assets-termbase-"));
+  const previous = process.env.TRANSILK_TERMBASE_DIR;
+  process.env.TRANSILK_TERMBASE_DIR = stateDir;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TRANSILK_TERMBASE_DIR;
+    else process.env.TRANSILK_TERMBASE_DIR = previous;
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  });
+}
 
 function assetFixture(t) {
   fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
@@ -14,6 +29,8 @@ function assetFixture(t) {
   const config = {
     title: "资产测试",
     date: "2026-08-09",
+    sourceFile: "01_原始材料/原文.txt",
+    targetFile: "01_原始材料/译文.txt",
     sourceLanguage: "zh-CN",
     targetLanguage: "en-US",
     sourceTermField: "zh_CN",
@@ -71,6 +88,7 @@ function assetFixture(t) {
   const glossaryPath = path.join(projectDir, config.glossarySource);
   fs.mkdirSync(path.dirname(glossaryPath), { recursive: true });
   fs.writeFileSync(glossaryPath, glossary.map((item) => JSON.stringify(item)).join("\n") + "\n", "utf8");
+  writeAssetConfig(projectDir, config);
   return { projectDir, config, precomputed: { sourceLines: ["OAuth 2.0 使用访问令牌。"], targetLines: ["OAuth 2.0 uses an access token."] } };
 }
 
@@ -130,4 +148,28 @@ test("asset workbook selects fonts by language", () => {
   assert.equal(fontForLanguage("ja-JP"), "Yu Gothic");
   assert.equal(fontForLanguage("ko-KR"), "Malgun Gothic");
   assert.equal(fontForLanguage("fr-FR"), "Aptos");
+});
+
+test("validated assets sync to the install-relative internal library idempotently", async (t) => {
+  withIsolatedTermbase(t);
+  const { projectDir, precomputed } = assetFixture(t);
+  const first = await runBuildAndValidate(projectDir, precomputed);
+  assert.equal(first.termbaseSync.changed, true);
+  assert.equal(first.termbaseSync.entries, 1);
+  assert.equal(loadInternalProjectTerms().length, 1);
+  assert.equal(fs.readdirSync(internalProjectsDir()).length, 1);
+  assert.match(readAssetConfig(projectDir).projectId, /^[0-9a-f-]{36}$/);
+
+  const second = await runBuildAndValidate(projectDir, precomputed);
+  assert.equal(second.termbaseSync.changed, false);
+  assert.equal(fs.readdirSync(internalProjectsDir()).length, 1);
+  assert.equal(loadInternalProjectTerms().length, 1);
+});
+
+test("asset failure does not create an internal library contribution", async (t) => {
+  withIsolatedTermbase(t);
+  const { projectDir, config, precomputed } = assetFixture(t);
+  writeAssetConfig(projectDir, { ...config, expectedSegments: 2 });
+  await assert.rejects(() => runBuildAndValidate(projectDir, precomputed), /句段数量不一致/);
+  assert.equal(fs.existsSync(internalProjectsDir()), false);
 });

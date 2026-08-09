@@ -470,3 +470,14 @@ test("review workbook exposes all selected source URLs", async (t) => {
   assert.equal(frozen.evidence_verification_level, "cross_checked");
   assert.deepEqual(frozen.evidence_sources, evidence[0].sources);
 });
+
+test("project override remains local evidence but is marked as project-scoped", async (t) => {
+  fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
+  const workbookPath = path.join(RUNTIME_TEMP_ROOT, `project-override-${Date.now()}.xlsx`);
+  t.after(() => fs.rmSync(workbookPath, { force: true }));
+  const evidence = [{ candidate_id: "c1", source: "local", local_kind: "project_override", quote: "项目专用译法", url: "" }];
+  await exportCandidatesToWorkbook(candidates, evidence, workbookPath, config);
+  const [frozen] = await importReviewedGlossary(workbookPath, candidates, evidence);
+  assert.equal(frozen.evidence_source, "local");
+  assert.equal(frozen.evidence_local_kind, "project_override");
+});

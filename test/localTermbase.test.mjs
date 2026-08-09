@@ -11,20 +11,22 @@ import {
   glossaryToTermbaseEntries,
   parseTbx,
   importTermbaseFromPath,
+  listMountedTermbases,
+  unmountExternalTermbase,
+  externalMountsPath,
 } from "../src/lib/localTermbase.mjs";
 import { checkOverridesAndLocal } from "../src/stages/03-verify.mjs";
 import { RUNTIME_TEMP_ROOT } from "../src/lib/paths.mjs";
 
 function withCleanTermbase(t) {
-  const p = termbasePath();
-  const backup = fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null;
-  if (fs.existsSync(p)) fs.rmSync(p);
+  fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
+  const tempDir = fs.mkdtempSync(path.join(RUNTIME_TEMP_ROOT, "transilk-termbase-state-"));
+  const previous = process.env.TRANSILK_TERMBASE_DIR;
+  process.env.TRANSILK_TERMBASE_DIR = tempDir;
   t.after(() => {
-    if (backup === null) fs.rmSync(p, { force: true });
-    else {
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      fs.writeFileSync(p, backup, "utf8");
-    }
+    if (previous === undefined) delete process.env.TRANSILK_TERMBASE_DIR;
+    else process.env.TRANSILK_TERMBASE_DIR = previous;
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 }
 
@@ -34,10 +36,10 @@ test("mergeIntoTermbase writes entries and lookupTerm finds them by language + t
     { sourceLanguage: "zh-CN", targetLanguage: "en-US", sourceTerm: "神经网络", targetTerm: "neural network", domain: "AI" },
   ]);
   const index = buildTermbaseIndex();
-  const hits = lookupTerm(index, "zh-CN", "神经网络", "AI");
+  const hits = lookupTerm(index, "zh-CN", "en-US", "神经网络", "AI");
   assert.equal(hits.length, 1);
   assert.equal(hits[0].targetTerm, "neural network");
-  assert.deepEqual(lookupTerm(index, "zh-CN", "不存在", "AI"), []);
+  assert.deepEqual(lookupTerm(index, "zh-CN", "en-US", "不存在", "AI"), []);
 });
 
 test("mergeIntoTermbase overwrites within the same domain, keeping the latest value", (t) => {
@@ -56,9 +58,9 @@ test("mergeIntoTermbase keeps separate senses for the same term across different
   const entries = loadTermbase();
   assert.equal(entries.length, 2);
   const index = buildTermbaseIndex();
-  assert.equal(lookupTerm(index, "zh-CN", "细胞", "医学")[0].targetTerm, "cell");
-  assert.equal(lookupTerm(index, "zh-CN", "细胞", "工程技术")[0].targetTerm, "battery cell");
-  assert.deepEqual(lookupTerm(index, "zh-CN", "细胞", "政务"), []);
+  assert.equal(lookupTerm(index, "zh-CN", "en-US", "细胞", "医学")[0].targetTerm, "cell");
+  assert.equal(lookupTerm(index, "zh-CN", "en-US", "细胞", "工程技术")[0].targetTerm, "battery cell");
+  assert.deepEqual(lookupTerm(index, "zh-CN", "en-US", "细胞", "政务"), []);
 });
 
 test("mergeIntoTermbase keeps separate senses for the same term within the same domain", (t) => {
@@ -68,14 +70,28 @@ test("mergeIntoTermbase keeps separate senses for the same term within the same 
   const entries = loadTermbase();
   assert.equal(entries.length, 2);
   const index = buildTermbaseIndex();
-  const hits = lookupTerm(index, "en-US", "party", "法律");
+  const hits = lookupTerm(index, "en-US", "zh-CN", "party", "法律");
   assert.equal(hits.length, 2);
   assert.deepEqual(hits.map((e) => e.targetTerm).sort(), ["当事人", "党派"].sort());
 
   mergeIntoTermbase([{ sourceLanguage: "en-US", targetLanguage: "zh-CN", sourceTerm: "party", targetTerm: "当事人", domain: "法律", note: "更新释义" }]);
-  const updated = lookupTerm(buildTermbaseIndex(), "en-US", "party", "法律");
+  const updated = lookupTerm(buildTermbaseIndex(), "en-US", "zh-CN", "party", "法律");
   assert.equal(updated.length, 2);
   assert.equal(updated.find((e) => e.targetTerm === "当事人").note, "更新释义");
+});
+
+test("local lookup separates target languages and consolidates identical local results", (t) => {
+  withCleanTermbase(t);
+  const index = buildTermbaseIndex([
+    { sourceLanguage: "en-US", targetLanguage: "zh-CN", sourceTerm: "model", targetTerm: "模型", domain: "信息技术", sourceKind: "internal" },
+    { sourceLanguage: "en-US", targetLanguage: "zh-CN", sourceTerm: "model", targetTerm: "模型", domain: "信息技术", sourceKind: "external" },
+    { sourceLanguage: "en-US", targetLanguage: "fr-FR", sourceTerm: "model", targetTerm: "modèle", domain: "信息技术", sourceKind: "external" },
+  ]);
+  const zh = lookupTerm(index, "en-US", "zh-CN", "model", "信息技术");
+  assert.equal(zh.length, 1);
+  assert.equal(zh[0].targetTerm, "模型");
+  assert.equal(zh[0].localSources.length, 2);
+  assert.equal(lookupTerm(index, "en-US", "fr-FR", "model", "信息技术")[0].targetTerm, "modèle");
 });
 
 test("glossaryToTermbaseEntries keeps only reusable terms and records provenance", () => {
@@ -93,6 +109,7 @@ test("glossaryToTermbaseEntries keeps only reusable terms and records provenance
     },
     { zh_CN: "废弃词", en_US: "deprecated", status: "弃用" },
     { zh_CN: "OAuth 2.0", en_US: "OAuth 2.0", status: "首选", translation_action: "do_not_translate" },
+    { zh_CN: "项目专用译法", en_US: "project wording", status: "首选", evidence_source: "local", evidence_local_kind: "project_override" },
   ];
   const entries = glossaryToTermbaseEntries(glossary, config);
   assert.equal(entries.length, 1);
@@ -144,7 +161,7 @@ test("parseTbx reads conceptEntry langSec pairs in both directions", () => {
   assert.equal(enToZh.targetTerm, "神经网络");
 });
 
-test("importTermbaseFromPath ingests a .tbx file and skips a .tmx file with a reason", (t) => {
+test("importTermbaseFromPath mounts a TBX without merging it into the internal legacy file", (t) => {
   withCleanTermbase(t);
   fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
   const tempDir = fs.mkdtempSync(path.join(RUNTIME_TEMP_ROOT, "transilk-termbase-import-"));
@@ -181,9 +198,22 @@ test("importTermbaseFromPath ingests a .tbx file and skips a .tmx file with a re
   assert.equal(result.skipped.length, 1);
   assert.equal(result.skipped[0].file, tmxPath);
   assert.equal(result.addedOrUpdated, 2);
+  assert.equal(listMountedTermbases().length, 1);
+  assert.equal(loadTermbase().length, 0);
+  assert.ok(fs.existsSync(externalMountsPath()));
 
   const index = buildTermbaseIndex();
-  assert.equal(lookupTerm(index, "zh-CN", "模型", "AI")[0].targetTerm, "model");
+  assert.equal(lookupTerm(index, "zh-CN", "en-US", "模型", "AI")[0].targetTerm, "model");
+
+  mergeIntoTermbase([{ sourceLanguage: "zh-CN", targetLanguage: "en-US", sourceTerm: "算法", targetTerm: "algorithm", domain: "AI" }]);
+  const legacyEntries = loadTermbase();
+  assert.equal(legacyEntries.length, 1);
+  assert.equal(legacyEntries[0].sourceTerm, "算法");
+  assert.equal("sourceKind" in legacyEntries[0], false);
+
+  const removed = unmountExternalTermbase(result.mounted[0].id);
+  assert.equal(removed.removed.name, "sample.tbx");
+  assert.equal(listMountedTermbases().length, 0);
 });
 
 test("checkOverridesAndLocal reports termbase hits with source \"local\" and skips web search", (t) => {
@@ -225,6 +255,7 @@ test("checkOverridesAndLocal falls back to web/model when the local termbase has
 
 test("checkOverridesAndLocal prefers a domain-scoped override over a plain source-term override", (t) => {
   withCleanTermbase(t);
+  mergeIntoTermbase([{ sourceLanguage: "en-US", targetLanguage: "zh-CN", sourceTerm: "party", targetTerm: "参与方", domain: "法律" }]);
   const config = { sourceLanguage: "en-US", targetLanguage: "zh-CN", sourceTermField: "en_US", targetTermField: "zh_CN" };
   const candidates = [
     { id: "c1", en_US: "party", zh_CN: "", domain: "法律" },
@@ -243,4 +274,6 @@ test("checkOverridesAndLocal prefers a domain-scoped override over a plain sourc
   const { evidence } = checkOverridesAndLocal(candidates, config, tempProjectDir);
   assert.equal(evidence.find((e) => e.candidate_id === "c1").quote, "当事人");
   assert.equal(evidence.find((e) => e.candidate_id === "c2").quote, "党派");
+  assert.ok(evidence.every((item) => item.source === "local" && item.local_kind === "project_override"));
+  assert.equal(loadTermbase()[0].targetTerm, "参与方");
 });

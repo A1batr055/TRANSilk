@@ -3,6 +3,7 @@ work/
 projects/
 dogfood/
 termbase/
+.runtime/
 domain-taxonomy/pending.jsonl
 domain-taxonomy/domains.local.jsonl
 config/secrets.local.json

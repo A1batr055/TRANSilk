@@ -78,6 +78,7 @@ export function bootstrapFromLegacyXls({ xlsPath, projectDir, title, segmentPref
   const language = resolveLanguageProfile(direction, segments);
 
   const config = {
+    projectId: crypto.randomUUID(),
     title,
     date,
     sourceFile: source.relativePath,
@@ -130,6 +131,7 @@ export async function bootstrapFromRawDocument({ sourcePath, targetPath, project
   const language = resolveLanguageProfile(direction, segments);
 
   const config = {
+    projectId: crypto.randomUUID(),
     title,
     date,
     sourceFile: materials.source.relativePath,

@@ -21,6 +21,7 @@ import {
   pendingDomainsPath,
 } from "./lib/domainTaxonomy.mjs";
 import { checkForUpdates } from "./lib/selfUpdate.mjs";
+import { listMountedTermbases, unmountExternalTermbase } from "./lib/localTermbase.mjs";
 
 const h = React.createElement;
 const CLI_PATH = path.join(TOOL_ROOT, "src", "cli.mjs");
@@ -158,12 +159,12 @@ function Running({ task }) {
   );
 }
 
-function Home({ projectCount, model, notice, onCreate, onProjects, onSettings, onImportTermbase, onDomainTaxonomy, onCheckUpdate, onClearConfig, onExit }) {
+function Home({ projectCount, termbaseCount, model, notice, onCreate, onProjects, onSettings, onImportTermbase, onDomainTaxonomy, onCheckUpdate, onClearConfig, onExit }) {
   const items = [
     { value: "new", label: "＋ 新建翻译项目" },
     { value: "projects", label: `项目列表  ·  ${projectCount} 个` },
     { value: "settings", label: `模型设置  ·  ${model.label}` },
-    { value: "import-termbase", label: "导入本地术语库" },
+    { value: "import-termbase", label: `外部术语库  ·  ${termbaseCount} 个挂载` },
     { value: "domain-taxonomy", label: "领域词表管理" },
     { value: "check-update", label: "检查更新" },
     { value: "clear-config", label: "清空本地 API 配置" },
@@ -194,13 +195,34 @@ function Home({ projectCount, model, notice, onCreate, onProjects, onSettings, o
 function ImportTermbasePath({ onSubmit, onBack }) {
   return h(
     Frame,
-    { title: "导入本地术语库", subtitle: "TBX 文件或目录" },
+    { title: "挂载外部术语库", subtitle: "TBX 文件或目录" },
     h(TextEntry, {
       label: "TBX 文件或所在目录的路径",
       placeholder: "可把文件或文件夹拖进终端",
       onSubmit,
       onBack,
     }),
+  );
+}
+
+export function ExternalTermbasesScreen({ mounts, notice, onMount, onUnmount, onBack }) {
+  const items = [
+    { value: "mount", label: "＋ 挂载 TBX 文件或目录" },
+    ...mounts.map((mount) => ({
+      value: `unmount:${mount.id}`,
+      label: `移除挂载 · ${mount.name} · ${mount.available ? `${mount.entryCount} 条` : "文件缺失"}`,
+    })),
+  ];
+  return h(
+    Frame,
+    { title: "外部术语库", subtitle: `${mounts.length} 个挂载` },
+    notice ? h(Box, { marginBottom: 1 }, h(Text, { color: notice.kind === "error" ? "red" : "green" }, notice.text)) : null,
+    h(Menu, {
+      items,
+      onBack,
+      onSelect: (item) => item.value === "mount" ? onMount() : onUnmount(item.value.slice("unmount:".length)),
+    }),
+    h(Hint, null, "外部文件由用户手动挂载；移除挂载不会删除原文件 · Esc 返回"),
   );
 }
 
@@ -924,6 +946,23 @@ export function App({ initialScreen, initialModel } = {}) {
       },
     });
   }
+  if (screen === "external-termbases") {
+    return h(ExternalTermbasesScreen, {
+      mounts: listMountedTermbases(),
+      notice,
+      onBack: () => setScreen("home"),
+      onMount: () => { setNotice(null); setScreen("import-termbase"); },
+      onUnmount: (id) => {
+        try {
+          const result = unmountExternalTermbase(id);
+          if (!result.removed) throw new Error(`未找到外部术语库挂载：${id}`);
+          setNotice({ kind: "success", text: `已移除“${result.removed.name}”的挂载，原文件未删除。` });
+        } catch (error) {
+          setNotice({ kind: "error", text: error.message });
+        }
+      },
+    });
+  }
   if (screen === "import-termbase") {
     return h(ImportTermbasePath, {
       onBack: () => setScreen("home"),
@@ -932,7 +971,7 @@ export function App({ initialScreen, initialModel } = {}) {
           const inputPath = normalizeInputPath(input);
           if (!inputPath) throw new Error("请输入路径。");
           if (!fs.existsSync(inputPath)) throw new Error(`路径不存在：${inputPath}`);
-          runCommand("导入本地术语库", ["import-termbase", inputPath], null);
+          runCommand("挂载外部术语库", ["mount-termbase", inputPath], null);
         } catch (error) {
           setNotice({ kind: "error", text: error.message });
           setScreen("home");
@@ -1083,6 +1122,7 @@ export function App({ initialScreen, initialModel } = {}) {
   }
   return h(Home, {
     projectCount: projects.length,
+    termbaseCount: listMountedTermbases().length,
     model,
     notice,
     onCreate: () => {
@@ -1109,7 +1149,7 @@ export function App({ initialScreen, initialModel } = {}) {
     },
     onImportTermbase: () => {
       setNotice(null);
-      setScreen("import-termbase");
+      setScreen("external-termbases");
     },
     onDomainTaxonomy: () => {
       setNotice(null);
