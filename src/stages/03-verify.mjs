@@ -159,9 +159,16 @@ export async function verifyCandidates(candidates, config, projectDir, {
     const search = searchById.get(knowledge.candidate_id);
     if (search?.status === "not_found") {
       const reason = search.reason ? `：${search.reason}` : "";
+      knowledge.web_fallback_status = "not_found";
+      knowledge.web_fallback_reason = search.reason || "未检出可靠来源";
       knowledge.quote = `[联网未检出${reason}]${knowledge.quote}`;
     }
-    if (search?.status === "error") knowledge.quote = `[联网失败：${search.error}]${knowledge.quote}`;
+    if (search?.status === "error") {
+      const error = search.error || "联网调用失败";
+      knowledge.web_fallback_status = "error";
+      knowledge.web_fallback_reason = error;
+      knowledge.quote = `[联网失败：${error}]${knowledge.quote}`;
+    }
   }
   onProgress({ step: "model_knowledge", total: stillUnresolved.length, found: knowledgeResults.length });
   return [...withWeb, ...knowledgeResults];

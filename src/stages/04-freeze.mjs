@@ -58,6 +58,20 @@ function evidenceUrls(ev) {
   return [...new Set(urls)].join("\n");
 }
 
+function structuredEvidenceSources(ev) {
+  const sources = (ev?.sources ?? [])
+    .map((source) => ({
+      url: String(source?.url ?? "").trim(),
+      title: String(source?.title ?? "").trim(),
+      excerpt: String(source?.excerpt ?? source?.quote ?? "").trim(),
+    }))
+    .filter((source) => source.url);
+  if (!sources.length && ev?.url) {
+    sources.push({ url: String(ev.url), title: "", excerpt: String(ev.quote ?? "") });
+  }
+  return [...new Map(sources.map((source) => [source.url, source])).values()];
+}
+
 export async function exportCandidatesToWorkbook(candidates, evidence, workbookPath, config) {
   const evidenceByCandidate = groupEvidence(evidence);
   const headers = reviewHeaders(config);
@@ -152,6 +166,10 @@ export async function importReviewedGlossary(workbookPath, candidates, evidence 
       evidence_source: best?.source ?? "",
       evidence_quote: best?.quote ?? "",
       evidence_url: evidenceUrls(best),
+      evidence_sources: structuredEvidenceSources(best),
+      evidence_verification_level: best?.verification_level ?? "",
+      web_fallback_status: best?.web_fallback_status ?? "",
+      web_fallback_reason: best?.web_fallback_reason ?? "",
     };
   });
 }

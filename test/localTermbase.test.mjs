@@ -78,17 +78,34 @@ test("mergeIntoTermbase keeps separate senses for the same term within the same 
   assert.equal(updated.find((e) => e.targetTerm === "当事人").note, "更新释义");
 });
 
-test("glossaryToTermbaseEntries drops deprecated entries and maps language fields", () => {
-  const config = { sourceLanguage: "zh-CN", targetLanguage: "en-US", domain: "AI", sourceTermField: "zh_CN", targetTermField: "en_US" };
+test("glossaryToTermbaseEntries keeps only reusable terms and records provenance", () => {
+  const config = { title: "术语资产测试", sourceLanguage: "zh-CN", targetLanguage: "en-US", domain: "AI", sourceTermField: "zh_CN", targetTermField: "en_US" };
   const glossary = [
-    { zh_CN: "模型", en_US: "model", status: "首选" },
+    {
+      id: "T1",
+      zh_CN: "模型",
+      en_US: "model",
+      status: "首选",
+      evidence_source: "web_search",
+      evidence_quote: "官方文档采用 model。",
+      evidence_verification_level: "cross_checked",
+      evidence_sources: [{ url: "https://example.org/model" }],
+    },
     { zh_CN: "废弃词", en_US: "deprecated", status: "弃用" },
+    { zh_CN: "OAuth 2.0", en_US: "OAuth 2.0", status: "首选", translation_action: "do_not_translate" },
   ];
   const entries = glossaryToTermbaseEntries(glossary, config);
   assert.equal(entries.length, 1);
   assert.equal(entries[0].sourceTerm, "模型");
   assert.equal(entries[0].targetTerm, "model");
   assert.equal(entries[0].sourceLanguage, "zh-CN");
+  assert.equal(entries[0].originProject, "术语资产测试");
+  assert.equal(entries[0].originEntryId, "T1");
+  assert.equal(entries[0].originEvidenceSource, "web_search");
+  assert.equal(entries[0].originEvidenceQuote, "官方文档采用 model。");
+  assert.equal(entries[0].originVerificationLevel, "cross_checked");
+  assert.deepEqual(entries[0].originEvidenceUrls, ["https://example.org/model"]);
+  assert.match(entries[0].approvedOn, /^\d{4}-\d{2}-\d{2}$/);
 });
 
 test("parseTbx reads conceptEntry langSec pairs in both directions", () => {

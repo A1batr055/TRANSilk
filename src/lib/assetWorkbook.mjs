@@ -156,6 +156,20 @@ class SharedStrings {
 const BORDER_THIN = { bottom: { style: "thin", color: C.border } };
 const BORDER_HAIR = { bottom: { style: "hair", color: C.border } };
 
+export function fontForLanguage(language) {
+  const base = String(language ?? "").split(/[-_]/)[0].toLowerCase();
+  if (base === "zh") return "Microsoft YaHei";
+  if (base === "ja") return "Yu Gothic";
+  if (base === "ko") return "Malgun Gothic";
+  if (base === "ar") return "Arial";
+  if (base === "th") return "Leelawadee UI";
+  return "Aptos";
+}
+
+function charsPerLine(language) {
+  return /^(zh|ja|ko)(?:[-_]|$)/iu.test(String(language ?? "")) ? 28 : 58;
+}
+
 function buildGuideSheet(reg, strings, { title, rows }) {
   const cells = [];
   cells.push({ row: 1, col: 1, value: title, style: reg.xfIndex({ font: { name: "Microsoft YaHei", size: 16, bold: true, color: C.white }, fill: C.navy, align: { horizontal: "left", vertical: "middle" } }) });
@@ -187,10 +201,6 @@ function buildGuideSheet(reg, strings, { title, rows }) {
 }
 
 function buildAlignedSheet(reg, strings, { title, pairs, sourceColumnLabel, targetColumnLabel, sourceLanguage, targetLanguage }) {
-  const isZh = (l) => /^zh(?:-|$)/iu.test(l);
-  const fontForLanguage = (l) => (isZh(l) ? "Microsoft YaHei" : "Aptos");
-  const charsPerLine = (l) => (isZh(l) ? 28 : 58);
-
   const cells = [];
   cells.push({ row: 1, col: 1, value: title, style: reg.xfIndex({ font: { name: "Microsoft YaHei", size: 16, bold: true, color: C.white }, fill: C.navy, align: { horizontal: "left", vertical: "middle" } }) });
   const headerStyle = reg.xfIndex({ font: { name: "Microsoft YaHei", size: 10, bold: true, color: C.white }, fill: C.blue, align: { horizontal: "center", vertical: "middle", wrapText: true }, border: BORDER_THIN });
@@ -237,19 +247,50 @@ function buildAlignedSheet(reg, strings, { title, pairs, sourceColumnLabel, targ
   };
 }
 
-function buildTermsSheet(reg, strings, { title, glossary, sourceColumnLabel, targetColumnLabel, sourceField, targetField }) {
+function evidenceTypeLabel(item) {
+  if (item.evidence_source === "local") return "本地术语库";
+  if (item.evidence_source === "web_search") return "联网查证";
+  if (item.evidence_source === "model_knowledge") {
+    if (item.web_fallback_status === "error") return "模型知识（联网失败）";
+    if (item.web_fallback_status === "not_found") return "模型知识（联网未检出）";
+    return "模型知识";
+  }
+  return item.evidence_source || "";
+}
+
+function verificationLevelLabel(level) {
+  if (level === "cross_checked") return "交叉查证";
+  if (level === "single_source") return "单一来源";
+  return "";
+}
+
+function buildTermsSheet(reg, strings, {
+  title,
+  glossary,
+  sourceColumnLabel,
+  targetColumnLabel,
+  sourceField,
+  targetField,
+  sourceLanguage,
+  targetLanguage,
+}) {
   const cells = [];
   cells.push({ row: 1, col: 1, value: title, style: reg.xfIndex({ font: { name: "Microsoft YaHei", size: 16, bold: true, color: C.white }, fill: C.navy, align: { horizontal: "left", vertical: "middle" } }) });
   const headerStyle = reg.xfIndex({ font: { name: "Microsoft YaHei", size: 10, bold: true, color: C.white }, fill: C.blue, align: { horizontal: "center", vertical: "middle", wrapText: true }, border: BORDER_THIN });
-  const headers = ["ID", sourceColumnLabel, `${targetColumnLabel}首选词`, `${targetColumnLabel}变体`, "词类", "领域", "状态", "释义", "复用说明", "来源句段", `${sourceColumnLabel}语境`, `${targetColumnLabel}语境`, "查证依据"];
+  const headers = ["ID", sourceColumnLabel, `${targetColumnLabel}首选词`, `${targetColumnLabel}变体`, "词类", "领域", "状态", "释义", "复用说明", "来源句段", `${sourceColumnLabel}语境`, `${targetColumnLabel}语境`, "依据类型", "查证等级", "来源 URL", "查证依据"];
   headers.forEach((h, i) => cells.push({ row: 3, col: i + 1, value: h, style: headerStyle }));
 
-  const centerCols = new Set([1, 5, 6, 7, 10]);
+  const centerCols = new Set([1, 5, 6, 7, 10, 13, 14]);
+  const sourceCols = new Set([2, 11]);
   const targetCols = new Set([3, 4, 12]);
   const rowHeights = { 1: 30 };
   let r = 4;
   for (const item of glossary) {
-    const evidenceText = item.evidence_quote ? `[${item.evidence_source}] ${item.evidence_quote}` : "";
+    const evidenceText = item.evidence_quote || "";
+    const evidenceUrls = (item.evidence_sources ?? [])
+      .map((source) => source?.url)
+      .filter(Boolean)
+      .join("\n") || item.evidence_url || "";
     const values = [
       item.id,
       item[sourceField],
@@ -263,6 +304,9 @@ function buildTermsSheet(reg, strings, { title, glossary, sourceColumnLabel, tar
       item.source_segment_id,
       item.context_source ?? item.context_zh,
       item.context_target ?? item.context_en,
+      evidenceTypeLabel(item),
+      verificationLevelLabel(item.evidence_verification_level),
+      evidenceUrls,
       evidenceText,
     ];
     const fill = r % 2 === 0 ? C.pale : null;
@@ -270,7 +314,16 @@ function buildTermsSheet(reg, strings, { title, glossary, sourceColumnLabel, tar
       const col = i + 1;
       const isStatus = col === 7;
       const align = { horizontal: centerCols.has(col) ? "center" : "left", vertical: "top", wrapText: true };
-      const font = { name: targetCols.has(col) ? "Aptos" : "Microsoft YaHei", size: 10 };
+      const font = {
+        name: sourceCols.has(col)
+          ? fontForLanguage(sourceLanguage)
+          : targetCols.has(col)
+          ? fontForLanguage(targetLanguage)
+          : col === 15
+          ? "Aptos"
+          : "Microsoft YaHei",
+        size: 10,
+      };
       const style = reg.xfIndex({ font, fill: isStatus ? C.gold : fill, align, border: BORDER_HAIR });
       const cell = { row: r, col, value, style };
       if (isStatus) cell.validation = ["首选", "待复核", "弃用"];
@@ -282,14 +335,14 @@ function buildTermsSheet(reg, strings, { title, glossary, sourceColumnLabel, tar
   const lastRow = r - 1;
   return {
     name: "术语库",
-    columns: [14, 22, 30, 34, 12, 14, 10, 46, 48, 16, 58, 78, 60],
-    merges: ["A1:M1"],
+    columns: [14, 22, 30, 34, 12, 14, 10, 46, 48, 16, 58, 78, 22, 16, 54, 60],
+    merges: ["A1:P1"],
     freeze: { xSplit: 3, ySplit: 3 },
-    autoFilter: `A3:M${lastRow}`,
+    autoFilter: `A3:P${lastRow}`,
     cells,
     rowHeights,
     lastRow,
-    lastCol: 13,
+    lastCol: 16,
   };
 }
 
@@ -397,6 +450,8 @@ export async function writeAssetWorkbook({
     targetColumnLabel,
     sourceField,
     targetField,
+    sourceLanguage,
+    targetLanguage,
   });
 
   const sheets = [guide, aligned, terms];

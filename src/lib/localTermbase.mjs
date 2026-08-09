@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { XMLParser } from "fast-xml-parser";
 import { TOOL_ROOT } from "./paths.mjs";
-import { termFields } from "./language.mjs";
+import { termFields, isReusableGlossaryTerm } from "./language.mjs";
 
 const xmlParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
 
@@ -68,7 +68,7 @@ export function glossaryToTermbaseEntries(glossary, config) {
   const { sourceField, targetField } = termFields(config);
   const today = new Date().toISOString().slice(0, 10);
   return glossary
-    .filter((g) => g.status !== "弃用")
+    .filter(isReusableGlossaryTerm)
     .map((g) => ({
       sourceLanguage: config.sourceLanguage,
       targetLanguage: config.targetLanguage,
@@ -77,6 +77,16 @@ export function glossaryToTermbaseEntries(glossary, config) {
       domain: g.domain || config.domain || "",
       definition: g.definition || g.definition_zh || "",
       note: g.note || g.note_zh || "",
+      originProject: config.title || g.source_title || "",
+      originEntryId: g.id || "",
+      approvedOn: today,
+      originEvidenceSource: g.evidence_source || "",
+      originEvidenceQuote: g.evidence_quote || "",
+      originVerificationLevel: g.evidence_verification_level || "",
+      originEvidenceUrls: ((g.evidence_sources ?? []).length
+        ? g.evidence_sources.map((source) => source?.url)
+        : String(g.evidence_url || "").split(/\r?\n/))
+        .filter(Boolean),
       updatedAt: today,
     }))
     .filter((e) => e.sourceTerm && e.targetTerm);

@@ -124,6 +124,15 @@ export function dedupeGlossaryTerms(entries, config) {
   });
 }
 
+export function isReusableGlossaryTerm(entry) {
+  const status = entry.status || "首选";
+  return status === "首选" && entry.translation_action !== "do_not_translate";
+}
+
+export function reusableGlossaryTerms(entries, config) {
+  return dedupeGlossaryTerms(entries.filter(isReusableGlossaryTerm), config);
+}
+
 export function languageLabelFor(code) {
   return languageName(normalizeLanguageCode(code));
 }

@@ -11,7 +11,7 @@ import {
 } from "../src/lib/webSearchClient.mjs";
 import { RUNTIME_TEMP_ROOT } from "../src/lib/paths.mjs";
 import { formatEvidenceSummary, summarizeEvidence } from "../src/lib/evidenceSummary.mjs";
-import { exportCandidatesToWorkbook } from "../src/stages/04-freeze.mjs";
+import { exportCandidatesToWorkbook, importReviewedGlossary } from "../src/stages/04-freeze.mjs";
 import { readSimpleWorkbook } from "../src/lib/xlsx.mjs";
 import { verifyCandidates } from "../src/stages/03-verify.mjs";
 
@@ -368,6 +368,8 @@ test("Stage 3 records a web failure before using model knowledge", async (t) => 
   });
   assert.equal(evidence[0].source, "model_knowledge");
   assert.match(evidence[0].quote, /^\[联网失败：连接超时\]/);
+  assert.equal(evidence[0].web_fallback_status, "error");
+  assert.equal(evidence[0].web_fallback_reason, "连接超时");
 });
 
 test("Stage 3 preserves a not-found reason before model knowledge", async (t) => {
@@ -379,6 +381,8 @@ test("Stage 3 preserves a not-found reason before model knowledge", async (t) =>
     modelKnowledge: async () => [{ candidate_id: "c1", source: "model_knowledge", quote: "[中]模型知识", url: "" }],
   });
   assert.match(evidence[0].quote, /^\[联网未检出：来源互相冲突\]/);
+  assert.equal(evidence[0].web_fallback_status, "not_found");
+  assert.equal(evidence[0].web_fallback_reason, "来源互相冲突");
 });
 
 test("Stage 3 keeps verified multi-source evidence and skips model knowledge", async (t) => {
@@ -446,16 +450,23 @@ test("review workbook exposes all selected source URLs", async (t) => {
   fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
   const workbookPath = path.join(RUNTIME_TEMP_ROOT, `web-source-${Date.now()}.xlsx`);
   t.after(() => fs.rmSync(workbookPath, { force: true }));
-  await exportCandidatesToWorkbook(candidates, [{
+  const evidence = [{
     candidate_id: "c1",
     source: "web_search",
     quote: "source text",
     url: "https://example.org/term",
-    sources: [{ url: "https://example.org/term" }, { url: "https://reference.example/term" }],
+    sources: [
+      { url: "https://example.org/term", title: "Example", excerpt: "source text" },
+      { url: "https://reference.example/term", title: "Reference", excerpt: "reference text" },
+    ],
     verification_level: "cross_checked",
-  }], workbookPath, config);
+  }];
+  await exportCandidatesToWorkbook(candidates, evidence, workbookPath, config);
   const workbook = await readSimpleWorkbook(fs.readFileSync(workbookPath));
   const urlColumn = workbook.headers.indexOf("来源 URL");
   assert.ok(urlColumn >= 0);
   assert.equal(workbook.rows[0][urlColumn], "https://example.org/term\nhttps://reference.example/term");
+  const [frozen] = await importReviewedGlossary(workbookPath, candidates, evidence);
+  assert.equal(frozen.evidence_verification_level, "cross_checked");
+  assert.deepEqual(frozen.evidence_sources, evidence[0].sources);
 });

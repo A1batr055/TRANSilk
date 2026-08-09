@@ -3,7 +3,7 @@ import path from "node:path";
 import { segmentId } from "./segment.mjs";
 import { projectSubdir } from "./paths.mjs";
 import { writeAssetWorkbook } from "./assetWorkbook.mjs";
-import { termFields, dedupeGlossaryTerms } from "./language.mjs";
+import { termFields, reusableGlossaryTerms } from "./language.mjs";
 
 
 function escXml(s) {
@@ -82,12 +82,19 @@ function buildTbx(glossary, config) {
       const evidence = g.evidence_quote
         ? `\n    <note>[${escXml(g.evidence_source)}] ${escXml(g.evidence_quote)}</note>`
         : "";
+      const evidenceUrls = (g.evidence_sources ?? [])
+        .map((source) => source?.url)
+        .filter(Boolean)
+        .join(" | ") || g.evidence_url || "";
+      const evidenceRefs = evidenceUrls
+        ? `\n    <note>来源：${escXml(evidenceUrls)}</note>`
+        : "";
       const variants = (g[`${targetField}_variants`] ?? g.en_variants ?? [])
         .map((v) => `\n        <termNote type="variant">${escXml(v)}</termNote>`)
         .join("");
       return `  <conceptEntry id="${escXml(g.id)}">
     <descrip type="subjectField">${escXml(g.domain || config.domain || "")}</descrip>
-    <descrip type="definition">${escXml(g.definition || g.definition_zh || "")}</descrip>${evidence}
+    <descrip type="definition">${escXml(g.definition || g.definition_zh || "")}</descrip>${evidence}${evidenceRefs}
     <langSec xml:lang="${escXml(config.sourceLanguage)}">
       <termSec>
         <term>${escXml(g[sourceField])}</term>
@@ -134,7 +141,7 @@ export async function buildAssets(config, projectDir, precomputed) {
   }
   if (config.expectedSegments && sourceLines.length !== config.expectedSegments) {
     throw new Error(
-      `句段数不符：实际 ${sourceLines.length}，asset-config.json 里 expectedSegments 是 ${config.expectedSegments}`
+      `句段数量不一致：实际为 ${sourceLines.length}，asset-config.json 中的 expectedSegments 为 ${config.expectedSegments}`
     );
   }
   const pairs = buildPairs(sourceLines, targetLines, config);
@@ -149,11 +156,13 @@ export async function buildAssets(config, projectDir, precomputed) {
         .map((l) => JSON.parse(l))
     : [];
   const { sourceField, targetField } = termFields(config);
-  const glossary = dedupeGlossaryTerms(
+  const glossary = reusableGlossaryTerms(
     glossaryRaw.map((g) => {
       const pair = pairsById.get(g.source_segment_id);
       return {
         ...g,
+        status: g.status || "首选",
+        domain: g.domain || config.domain || "",
         en_variants: g.en_variants ?? [],
         [`${targetField}_variants`]: g[`${targetField}_variants`] ?? g.en_variants ?? [],
         context_source: pair?.[sourceField] ?? "",
