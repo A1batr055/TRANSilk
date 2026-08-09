@@ -40,8 +40,8 @@
    Windows下也可直接双击 `TRANSilk.cmd`。
 
 3. 首次执行需要模型的Stage时，按提示完成配置向导。API key 保存在本地
-   `config/secrets.local.json`（已被Git忽略）；如需更换账号，在TUI首页选择
-   「清空本地API配置」。
+   `config/secrets.local.json`（已被 Git 忽略）；如需更换账号，在 TUI 的「模型设置」中选择
+   「清空本地 API 配置」。
 
 ## 使用方法
 
@@ -141,9 +141,10 @@ TUI显示各层数量及证据等级；术语审阅表保存所选证据及其�
 
 **检查更新**
 
-TUI首页「检查更新」（或命令行`transilk check-update`）拉取上游仓库最新提交，仅当本地可无冲突
-快进合并时才自动拉取；本地与远端历史分叉时不会自动合并，会提示手动处理。此操作需要能访问
-GitHub，网络受限环境需自行配置代理（如设置`HTTP_PROXY`/`HTTPS_PROXY`环境变量）。
+TUI 每 24 小时在后台检查一次更新；自动检查只提示新版本，不修改工作区，离线或超时也不影响使用。
+在「其他设置」中选择「检查并安装更新」（或运行 `transilk check-update`）后，TRANSilk 才会拉取
+上游提交。仅支持无冲突的快进合并；历史分叉时会停止并提示手动处理。访问 GitHub 受限时，需自行
+配置代理，例如设置 `HTTP_PROXY` 或 `HTTPS_PROXY` 环境变量。
 
 **使用订阅账号（Claude Code CLI／Codex CLI）**
 

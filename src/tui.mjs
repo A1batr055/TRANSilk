@@ -20,7 +20,7 @@ import {
   loadPendingDomains,
   pendingDomainsPath,
 } from "./lib/domainTaxonomy.mjs";
-import { checkForUpdates } from "./lib/selfUpdate.mjs";
+import { autoCheckForUpdates, checkForUpdates } from "./lib/selfUpdate.mjs";
 import { listMountedTermbases, unmountExternalTermbase } from "./lib/localTermbase.mjs";
 import { ensureProjectOverridesWorkbook } from "./lib/projectOverrides.mjs";
 
@@ -160,16 +160,12 @@ function Running({ task }) {
   );
 }
 
-function Home({ projectCount, termbaseCount, model, notice, onCreate, onProjects, onSettings, onImportTermbase, onDomainTaxonomy, onCheckUpdate, onClearConfig, onExit }) {
+function Home({ projectCount, model, notice, onCreate, onProjects, onModelSettings, onOtherSettings }) {
   const items = [
     { value: "new", label: "＋ 新建翻译项目" },
     { value: "projects", label: `项目列表  ·  ${projectCount} 个` },
-    { value: "settings", label: `模型设置  ·  ${model.label}` },
-    { value: "import-termbase", label: `外部术语库  ·  ${termbaseCount} 个挂载` },
-    { value: "domain-taxonomy", label: "领域词表管理" },
-    { value: "check-update", label: "检查更新" },
-    { value: "clear-config", label: "清空本地 API 配置" },
-    { value: "exit", label: "退出" },
+    { value: "model-settings", label: `模型设置  ·  ${model.label}` },
+    { value: "other-settings", label: "其他设置" },
   ];
 
   return h(
@@ -181,12 +177,8 @@ function Home({ projectCount, termbaseCount, model, notice, onCreate, onProjects
       onSelect: (item) => {
         if (item.value === "new") onCreate();
         else if (item.value === "projects") onProjects();
-        else if (item.value === "settings") onSettings();
-        else if (item.value === "import-termbase") onImportTermbase();
-        else if (item.value === "domain-taxonomy") onDomainTaxonomy();
-        else if (item.value === "check-update") onCheckUpdate();
-        else if (item.value === "clear-config") onClearConfig();
-        else if (item.value === "exit") onExit();
+        else if (item.value === "model-settings") onModelSettings();
+        else if (item.value === "other-settings") onOtherSettings();
       },
     }),
     h(Hint, null, "↑↓ 选择 · Enter 确认 · Ctrl+C 退出"),
@@ -224,6 +216,58 @@ export function ExternalTermbasesScreen({ mounts, notice, onMount, onUnmount, on
       onSelect: (item) => item.value === "mount" ? onMount() : onUnmount(item.value.slice("unmount:".length)),
     }),
     h(Hint, null, "外部文件由用户手动挂载；移除挂载不会删除原文件 · Esc 返回"),
+  );
+}
+
+export function ModelSettingsScreen({ model, notice, onSelectModel, onConfigure, onClearConfig, onBack }) {
+  return h(
+    Frame,
+    { title: "模型设置", subtitle: model.label },
+    notice ? h(Box, { marginBottom: 1 }, h(Text, { color: notice.kind === "error" ? "red" : "green" }, notice.text)) : null,
+    h(Menu, {
+      items: [
+        { value: "select", label: model.configured ? `选择模型  ·  ${model.label}` : "配置模型" },
+        { value: "configure", label: "配置服务商 / API Key" },
+        { value: "clear", label: "清空本地 API 配置" },
+      ],
+      onSelect: (item) => item.value === "select" ? onSelectModel() : item.value === "configure" ? onConfigure() : onClearConfig(),
+      onBack,
+    }),
+    h(Hint, null, "模型选择、服务商和本地密钥统一在此管理 · Esc 返回"),
+  );
+}
+
+export function OtherSettingsScreen({ notice, onTerminology, onCheckUpdate, onExit, onBack }) {
+  return h(
+    Frame,
+    { title: "其他设置", subtitle: "术语资源与应用维护" },
+    notice ? h(Box, { marginBottom: 1 }, h(Text, { color: notice.kind === "error" ? "red" : notice.kind === "pending" ? "yellow" : "green" }, notice.text)) : null,
+    h(Menu, {
+      items: [
+        { value: "terminology", label: "术语与领域" },
+        { value: "update", label: "检查并安装更新" },
+        { value: "exit", label: "退出 TRANSilk" },
+      ],
+      onSelect: (item) => item.value === "terminology" ? onTerminology() : item.value === "update" ? onCheckUpdate() : onExit(),
+      onBack,
+    }),
+    h(Hint, null, "↑↓ 选择 · Enter 确认 · Esc 返回首页"),
+  );
+}
+
+export function TerminologySettingsScreen({ termbaseCount, onExternalTermbases, onDomainTaxonomy, onBack }) {
+  return h(
+    Frame,
+    { title: "术语与领域", subtitle: "本地资源" },
+    h(Menu, {
+      items: [
+        { value: "external", label: `外部术语库  ·  ${termbaseCount} 个挂载` },
+        { value: "domains", label: "领域词表管理" },
+      ],
+      onSelect: (item) => item.value === "external" ? onExternalTermbases() : onDomainTaxonomy(),
+      onBack,
+    }),
+    h(Hint, null, "项目专用译法在各项目内管理 · Esc 返回其他设置"),
   );
 }
 
@@ -775,13 +819,14 @@ function openPath(targetPath) {
   child.unref();
 }
 
-export function App({ initialScreen, initialModel } = {}) {
+export function App({ initialScreen, initialModel, autoCheckUpdates = false } = {}) {
   const { exit } = useApp();
   const [screen, setScreen] = useState(() => initialScreen || "home");
   const [projects, setProjects] = useState(() => listProjects());
   const [model, setModel] = useState(() => initialModel || modelConfigSummary());
   const [projectDir, setProjectDir] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [updateNotice, setUpdateNotice] = useState(null);
   const [running, setRunning] = useState(null);
   const [pending, setPending] = useState(null);
   const [switchConfig, setSwitchConfig] = useState(null);
@@ -791,7 +836,18 @@ export function App({ initialScreen, initialModel } = {}) {
 
   const refresh = useCallback(() => setProjects(listProjects()), []);
 
-  const runCommand = useCallback((label, args, selectedDir = projectDir, cleanupOnFailure = false) => {
+  useEffect(() => {
+    if (!autoCheckUpdates) return undefined;
+    let active = true;
+    autoCheckForUpdates()
+      .then((result) => {
+        if (active && result.status === "available") setUpdateNotice({ kind: "pending", text: result.message });
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [autoCheckUpdates]);
+
+  const runCommand = useCallback((label, args, selectedDir = projectDir, cleanupOnFailure = false, completionScreen = "home") => {
     setNotice(null);
     setRunning({ label, lines: [] });
     const outputLines = [];
@@ -825,7 +881,7 @@ export function App({ initialScreen, initialModel } = {}) {
       setRunning(null);
       refresh();
       if (selectedDir && code === 0) setProjectDir(selectedDir);
-      setScreen(selectedDir && code === 0 ? "project" : "home");
+      setScreen(selectedDir && code === 0 ? "project" : completionScreen);
       const detail = spawnError?.message || outputLines.at(-1);
       setNotice(code === 0
         ? { kind: "success", text: `${label}完成。` }
@@ -905,10 +961,56 @@ export function App({ initialScreen, initialModel } = {}) {
       },
     });
   }
+  if (screen === "model-settings") {
+    return h(ModelSettingsScreen, {
+      model,
+      notice,
+      onBack: () => { setNotice(null); setScreen("home"); },
+      onSelectModel: () => {
+        setNotice(null);
+        const config = readModelConfig();
+        const provider = config?.[config.provider];
+        const providerReady = provider?.protocol === "cli-agent" || Boolean(provider?.baseURL && provider?.apiKey);
+        if (providerReady) {
+          setSwitchConfig(config);
+          setScreen("model-switch");
+        } else {
+          setScreen("config");
+        }
+      },
+      onConfigure: () => { setPending(null); setNotice(null); setScreen("config"); },
+      onClearConfig: () => { setPending(null); setNotice(null); setScreen("clear-config"); },
+    });
+  }
+  if (screen === "other-settings") {
+    return h(OtherSettingsScreen, {
+      notice: notice || updateNotice,
+      onBack: () => { setNotice(null); setScreen("home"); },
+      onTerminology: () => { setNotice(null); setScreen("terminology-settings"); },
+      onCheckUpdate: async () => {
+        setNotice({ kind: "pending", text: "正在检查并安装更新…" });
+        try {
+          const result = await checkForUpdates();
+          setNotice({ kind: result.status === "diverged" ? "error" : "success", text: result.message });
+        } catch (error) {
+          setNotice({ kind: "error", text: `检查更新失败：${error.message}，可手动执行 git pull 重试` });
+        }
+      },
+      onExit: exit,
+    });
+  }
+  if (screen === "terminology-settings") {
+    return h(TerminologySettingsScreen, {
+      termbaseCount: listMountedTermbases().length,
+      onBack: () => setScreen("other-settings"),
+      onExternalTermbases: () => { setNotice(null); setScreen("external-termbases"); },
+      onDomainTaxonomy: () => { setNotice(null); setScreen("domain-taxonomy"); },
+    });
+  }
   if (screen === "model-switch" && switchConfig) {
     return h(ModelSwitch, {
       config: switchConfig,
-      onBack: () => setScreen("home"),
+      onBack: () => setScreen("model-settings"),
       onReconfigure: () => setScreen("config"),
       onComplete: (selectedModel, effort) => {
         const providerKey = switchConfig.provider;
@@ -919,18 +1021,18 @@ export function App({ initialScreen, initialModel } = {}) {
         setModel(modelConfigSummary());
         setSwitchConfig(null);
         setNotice({ kind: "success", text: `已切换到 ${selectedModel}。` });
-        setScreen("home");
+        setScreen("model-settings");
       },
     });
   }
   if (screen === "clear-config") {
     return h(ClearConfigConfirm, {
-      onBack: () => setScreen("home"),
+      onBack: () => setScreen("model-settings"),
       onConfirm: () => {
         const cleared = clearModelConfig();
         setModel(modelConfigSummary());
         setNotice({ kind: cleared ? "success" : "error", text: cleared ? "本地 API 配置已清空。" : "当前没有本地 API 配置。" });
-        setScreen("home");
+        setScreen("model-settings");
       },
     });
   }
@@ -958,7 +1060,7 @@ export function App({ initialScreen, initialModel } = {}) {
     return h(ExternalTermbasesScreen, {
       mounts: listMountedTermbases(),
       notice,
-      onBack: () => setScreen("home"),
+      onBack: () => setScreen("terminology-settings"),
       onMount: () => { setNotice(null); setScreen("import-termbase"); },
       onUnmount: (id) => {
         try {
@@ -973,16 +1075,16 @@ export function App({ initialScreen, initialModel } = {}) {
   }
   if (screen === "import-termbase") {
     return h(ImportTermbasePath, {
-      onBack: () => setScreen("home"),
+      onBack: () => setScreen("external-termbases"),
       onSubmit: (input) => {
         try {
           const inputPath = normalizeInputPath(input);
           if (!inputPath) throw new Error("请输入路径。");
           if (!fs.existsSync(inputPath)) throw new Error(`路径不存在：${inputPath}`);
-          runCommand("挂载外部术语库", ["mount-termbase", inputPath], null);
+          runCommand("挂载外部术语库", ["mount-termbase", inputPath], null, false, "external-termbases");
         } catch (error) {
           setNotice({ kind: "error", text: error.message });
-          setScreen("home");
+          setScreen("external-termbases");
         }
       },
     });
@@ -992,7 +1094,7 @@ export function App({ initialScreen, initialModel } = {}) {
       domains: listDomainLabels(),
       pending: loadPendingDomains(),
       notice,
-      onBack: () => setScreen("home"),
+      onBack: () => setScreen("terminology-settings"),
       onSelectPending: (index) => { setPendingDomainIndex(index); setNotice(null); setScreen("domain-pending"); },
       onAdd: () => { setNotice(null); setScreen("domain-add"); },
       onRefresh: () => setNotice({ kind: "success", text: "领域词表已重新读取。" }),
@@ -1093,7 +1195,7 @@ export function App({ initialScreen, initialModel } = {}) {
   if (screen === "config") {
     return h(ConfigWizard, {
       pendingLabel: pending?.label,
-      onBack: () => setScreen(pending?.projectDir ? "project" : "home"),
+      onBack: () => setScreen(pending?.projectDir ? "project" : "model-settings"),
       onComplete: (values) => {
         const preset = MODEL_PRESETS[values.providerKey];
         const existing = readModelConfig() || {};
@@ -1111,7 +1213,7 @@ export function App({ initialScreen, initialModel } = {}) {
         if (task) runCommand(task.label, task.args, task.projectDir);
         else {
           setNotice({ kind: "success", text: "模型配置已保存。" });
-          setScreen("home");
+          setScreen("model-settings");
         }
       },
     });
@@ -1130,9 +1232,8 @@ export function App({ initialScreen, initialModel } = {}) {
   }
   return h(Home, {
     projectCount: projects.length,
-    termbaseCount: listMountedTermbases().length,
     model,
-    notice,
+    notice: notice || updateNotice,
     onCreate: () => {
       setNotice(null);
       setScreen("create");
@@ -1142,46 +1243,12 @@ export function App({ initialScreen, initialModel } = {}) {
       setNotice(null);
       setScreen("projects");
     },
-    onSettings: () => {
-      setPending(null);
-      setNotice(null);
-      const config = readModelConfig();
-      const provider = config?.[config.provider];
-      const providerReady = provider?.protocol === "cli-agent" || Boolean(provider?.baseURL && provider?.apiKey);
-      if (providerReady) {
-        setSwitchConfig(config);
-        setScreen("model-switch");
-      } else {
-        setScreen("config");
-      }
-    },
-    onImportTermbase: () => {
-      setNotice(null);
-      setScreen("external-termbases");
-    },
-    onDomainTaxonomy: () => {
-      setNotice(null);
-      setScreen("domain-taxonomy");
-    },
-    onCheckUpdate: async () => {
-      setNotice({ kind: "pending", text: "正在检查更新…" });
-      try {
-        const result = await checkForUpdates();
-        setNotice({ kind: result.status === "diverged" ? "error" : "success", text: result.message });
-      } catch (error) {
-        setNotice({ kind: "error", text: `检查更新失败：${error.message}，可手动执行 git pull 重试` });
-      }
-    },
-    onClearConfig: () => {
-      setPending(null);
-      setNotice(null);
-      setScreen("clear-config");
-    },
-    onExit: exit,
+    onModelSettings: () => { setPending(null); setNotice(null); setScreen("model-settings"); },
+    onOtherSettings: () => { setNotice(null); setScreen("other-settings"); },
   });
 }
 
 export async function launchTui() {
-  const instance = render(h(App), { alternateScreen: true, incrementalRendering: false });
+  const instance = render(h(App, { autoCheckUpdates: true }), { alternateScreen: true, incrementalRendering: false });
   await instance.waitUntilExit();
 }

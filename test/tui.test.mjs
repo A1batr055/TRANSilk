@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import React from "react";
 import { render } from "ink-testing-library";
-import { App, ConfigWizard, DomainPendingEditScreen, DomainTaxonomyScreen, ExternalTermbasesScreen, ModelSwitch, ProjectList, ProjectView } from "../src/tui.mjs";
+import { App, ConfigWizard, DomainPendingEditScreen, DomainTaxonomyScreen, ExternalTermbasesScreen, ModelSettingsScreen, ModelSwitch, OtherSettingsScreen, ProjectList, ProjectView, TerminologySettingsScreen } from "../src/tui.mjs";
 import { listAvailableModels } from "../src/lib/modelCatalog.mjs";
 import { inspectProject, normalizeInputPath, projectSlug } from "../src/lib/tuiState.mjs";
 import { detectDirection, resolveLanguageProfile, termFields } from "../src/lib/language.mjs";
@@ -17,6 +17,7 @@ import { resolveSourceSegments, targetXlsOutputPath } from "../src/lib/sourceAda
 import { readDocumentParagraphs } from "../src/lib/docReader.mjs";
 import { RUNTIME_TEMP_ROOT } from "../src/lib/paths.mjs";
 import { projectOverridesPath, readProjectOverridesWorkbook } from "../src/lib/projectOverrides.mjs";
+import { autoCheckForUpdates } from "../src/lib/selfUpdate.mjs";
 
 const appProps = { initialScreen: "home", initialModel: { configured: true, label: "测试模型" } };
 
@@ -108,16 +109,65 @@ test("XLSX projects preserve the XLSX delivery extension", () => {
 
 test("TUI opens the create-project wizard from the home screen", async () => {
   const view = render(React.createElement(App, appProps));
-  assert.match(view.lastFrame(), /清空本地 API 配置/);
   assert.match(view.lastFrame(), /TRANSilk/);
   assert.match(view.lastFrame(), /新建翻译项目/);
   assert.match(view.lastFrame(), /项目列表/);
   assert.match(view.lastFrame(), /模型设置/);
-  assert.match(view.lastFrame(), /外部术语库/);
+  assert.match(view.lastFrame(), /其他设置/);
+  assert.doesNotMatch(view.lastFrame(), /外部术语库/);
+  assert.doesNotMatch(view.lastFrame(), /清空本地 API 配置/);
+  assert.doesNotMatch(view.lastFrame(), /检查并安装更新/);
   view.stdin.write("\r");
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.match(view.lastFrame(), /原始材料路径/);
   view.unmount();
+});
+
+test("TUI groups model, terminology, and maintenance actions below the home screen", () => {
+  const model = render(React.createElement(ModelSettingsScreen, {
+    model: { configured: true, label: "测试模型" },
+    notice: null,
+    onSelectModel() {},
+    onConfigure() {},
+    onClearConfig() {},
+    onBack() {},
+  }));
+  assert.match(model.lastFrame(), /选择模型  ·  测试模型/);
+  assert.match(model.lastFrame(), /配置服务商 \/ API Key/);
+  assert.match(model.lastFrame(), /清空本地 API 配置/);
+  model.unmount();
+
+  const other = render(React.createElement(OtherSettingsScreen, {
+    notice: null,
+    onTerminology() {},
+    onCheckUpdate() {},
+    onExit() {},
+    onBack() {},
+  }));
+  assert.match(other.lastFrame(), /术语与领域/);
+  assert.match(other.lastFrame(), /检查并安装更新/);
+  assert.match(other.lastFrame(), /退出 TRANSilk/);
+  assert.doesNotMatch(other.lastFrame(), /外部术语库/);
+  other.unmount();
+
+  const terminology = render(React.createElement(TerminologySettingsScreen, {
+    termbaseCount: 2,
+    onExternalTermbases() {},
+    onDomainTaxonomy() {},
+    onBack() {},
+  }));
+  assert.match(terminology.lastFrame(), /外部术语库  ·  2 个挂载/);
+  assert.match(terminology.lastFrame(), /领域词表管理/);
+  terminology.unmount();
+});
+
+test("automatic update checks honor the 24-hour cooldown without accessing the network", async (t) => {
+  fs.mkdirSync(RUNTIME_TEMP_ROOT, { recursive: true });
+  const statePath = path.join(RUNTIME_TEMP_ROOT, `update-check-${Date.now()}.json`);
+  fs.writeFileSync(statePath, `${JSON.stringify({ checkedAt: 2000 })}\n`, "utf8");
+  t.after(() => fs.rmSync(statePath, { force: true }));
+  const result = await autoCheckForUpdates({ now: 3000, statePath });
+  assert.equal(result.status, "skipped");
 });
 
 test("external termbase screen distinguishes mounting from deleting the source file", () => {

@@ -1,8 +1,12 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { TOOL_ROOT } from "./paths.mjs";
 
 const UPSTREAM_BRANCH = "main";
 const GIT_TIMEOUT_MS = 15000;
+const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const AUTO_CHECK_STATE_PATH = path.join(TOOL_ROOT, ".runtime", "update-check.json");
 
 function killTree(child) {
   if (process.platform === "win32") spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true });
@@ -40,7 +44,7 @@ function runGit(args, timeoutMs = GIT_TIMEOUT_MS) {
   });
 }
 
-export async function checkForUpdates() {
+export async function inspectForUpdates() {
   await runGit(["fetch", "origin", UPSTREAM_BRANCH]);
   const local = await runGit(["rev-parse", "HEAD"]);
   const remote = await runGit(["rev-parse", `origin/${UPSTREAM_BRANCH}`]);
@@ -52,8 +56,26 @@ export async function checkForUpdates() {
     return { status: "ahead", message: "本地领先远端，暂无可拉取的更新。" };
   }
   if (base === local) {
-    await runGit(["pull", "--ff-only", "origin", UPSTREAM_BRANCH]);
-    return { status: "updated", message: "已拉取最新更新，请重启程序生效。" };
+    return { status: "available", message: "发现新版本，可在“其他设置”中安装更新。" };
   }
   return { status: "diverged", message: "本地与远端历史出现分叉，无法自动合并，请手动执行 git 操作处理。" };
+}
+
+export async function checkForUpdates() {
+  const result = await inspectForUpdates();
+  if (result.status !== "available") return result;
+  await runGit(["pull", "--ff-only", "origin", UPSTREAM_BRANCH]);
+  return { status: "updated", message: "已拉取最新更新，请重启程序生效。" };
+}
+
+export async function autoCheckForUpdates({ now = Date.now(), statePath = AUTO_CHECK_STATE_PATH } = {}) {
+  try {
+    const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    if (Number.isFinite(state.checkedAt) && now - state.checkedAt < AUTO_CHECK_INTERVAL_MS) {
+      return { status: "skipped", message: "尚未到下次自动检查时间。" };
+    }
+  } catch {}
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  fs.writeFileSync(statePath, `${JSON.stringify({ checkedAt: now }, null, 2)}\n`, "utf8");
+  return inspectForUpdates();
 }
